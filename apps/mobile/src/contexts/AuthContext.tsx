@@ -35,7 +35,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session } }: { data: { session: Session | null } }) => {
       setSession(session);
       if (session?.user) {
         fetchUserData(session.user.id);
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      async (event: string, session: Session | null) => {
         setSession(session);
         if (session?.user) {
           await fetchUserData(session.user.id);
@@ -77,7 +77,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (error) throw error;
 
-      const userOrgs = organizations?.map(item => item.organization) || [];
+      const userOrgs = organizations?.map((item: any) => item.organization) || [];
       
       const userData: User = {
         id: userId,

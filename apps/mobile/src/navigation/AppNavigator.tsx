@@ -33,9 +33,30 @@ export type MainTabParamList = {
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-// Simple RFID screen with built-in tabs
-function RfidScreen() {
-  return <ReaderSettingsScreen />;
+// RFID tabs component that includes both Reader Settings and Tag Stream
+function RfidTabs() {
+  const Tab = createBottomTabNavigator();
+  
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
+      }}
+    >
+      <Tab.Screen
+        name="ReaderSettings"
+        component={ReaderSettingsScreen}
+        options={{ tabBarLabel: 'Settings' }}
+      />
+      <Tab.Screen
+        name="TagStream"
+        component={TagStreamScreen}
+        options={{ tabBarLabel: 'Tag Stream' }}
+      />
+    </Tab.Navigator>
+  );
 }
 
 function MainTabs() {
@@ -131,7 +152,7 @@ export default function AppNavigator() {
             <Stack.Screen
               name="Capture"
               component={CaptureScreen}
-              options={({ route }) => ({ 
+              options={({ route }: { route: any }) => ({ 
                 title: `Capture - ${route.params.batchName}` 
               })}
             />

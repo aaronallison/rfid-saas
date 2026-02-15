@@ -1,6 +1,18 @@
 {
-  "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    "jsx": "react-jsx",
+    "target": "ES2018",
+    "lib": ["ES2018", "DOM"],
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "declaration": false,
+    "isolatedModules": true
+  },
+  "include": ["src/**/*", "App.tsx", "index.ts"],
+  "exclude": ["node_modules"]
 }
