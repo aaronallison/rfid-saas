@@ -1,72 +1,72 @@
 import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
-import { createClient } from '@supabase/supabase-js'
-import { Database } from '@/lib/supabase'
+import { authenticateAndAuthorize } from '@/lib/auth-utils'
+import { getOrganizationBillingInfo } from '@/lib/billing-utils'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2024-06-20',
 })
 
-const supabase = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+interface PortalRequestBody {
+  org_id: string
+}
 
 export async function POST(request: NextRequest) {
   try {
-    const { org_id } = await request.json()
-
-    if (!org_id) {
+    // Validate environment variables
+    if (!process.env.STRIPE_SECRET_KEY || !process.env.NEXT_PUBLIC_SITE_URL) {
+      console.error('Missing required environment variables')
       return NextResponse.json(
-        { error: 'Organization ID is required' },
+        { error: 'Server configuration error' },
+        { status: 500 }
+      )
+    }
+
+    // Parse and validate request body
+    let body: PortalRequestBody
+    try {
+      body = await request.json()
+    } catch (error) {
+      return NextResponse.json(
+        { error: 'Invalid JSON in request body' },
         { status: 400 }
       )
     }
 
-    // Get the user from the session
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
+    const { org_id } = body
+
+    if (!org_id || typeof org_id !== 'string') {
       return NextResponse.json(
-        { error: 'No authorization header' },
-        { status: 401 }
+        { error: 'Organization ID is required and must be a string' },
+        { status: 400 }
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token)
-
-    if (userError || !user) {
+    // Authenticate user and check organization access
+    const authResult = await authenticateAndAuthorize(request, org_id, ['owner', 'admin'])
+    
+    if (!authResult.success) {
       return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
+        { error: authResult.error },
+        { status: authResult.status }
       )
     }
 
-    // Verify user has access to the organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('organization_members')
-      .select('role')
-      .eq('organization_id', org_id)
-      .eq('user_id', user.id)
-      .single()
-
-    if (membershipError || !membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+    // Get billing information
+    const billingResult = await getOrganizationBillingInfo(org_id)
+    
+    if (!billingResult.success) {
       return NextResponse.json(
-        { error: 'Insufficient permissions' },
-        { status: 403 }
+        { error: billingResult.error },
+        { status: billingResult.status }
       )
     }
 
-    // Get billing info
-    const { data: billingInfo, error: billingError } = await supabase
-      .from('billing_org')
-      .select('stripe_customer_id')
-      .eq('org_id', org_id)
-      .single()
+    const { billingInfo } = billingResult
 
-    if (billingError || !billingInfo?.stripe_customer_id) {
+    if (!billingInfo?.stripe_customer_id) {
       return NextResponse.json(
-        { error: 'No billing information found' },
+        { error: 'No billing customer found. Please subscribe first.' },
         { status: 404 }
       )
     }
@@ -77,10 +77,31 @@ export async function POST(request: NextRequest) {
       return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing`,
     })
 
-    return NextResponse.json({ url: session.url })
+    if (!session.url) {
+      console.error('Stripe portal session created but no URL returned')
+      return NextResponse.json(
+        { error: 'Failed to create portal session' },
+        { status: 500 }
+      )
+    }
+
+    return NextResponse.json({ 
+      url: session.url,
+      customerId: billingInfo.stripe_customer_id,
+      billingStatus: billingInfo.billing_status
+    })
 
   } catch (error) {
     console.error('Error creating portal session:', error)
+    
+    // Don't expose internal error details to client
+    if (error instanceof Stripe.errors.StripeError) {
+      return NextResponse.json(
+        { error: 'Payment service error' },
+        { status: 502 }
+      )
+    }
+
     return NextResponse.json(
       { error: 'Failed to create portal session' },
       { status: 500 }
