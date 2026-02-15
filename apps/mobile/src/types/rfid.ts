@@ -45,6 +45,18 @@ export interface IRfidReader {
    * @returns string identifier for the reader type
    */
   getReaderType(): string;
+
+  /**
+   * Configure reader-specific settings (optional)
+   * @param settings Reader-specific configuration options
+   */
+  configure?(settings: Record<string, any>): Promise<void>;
+
+  /**
+   * Check if inventory/scanning is currently active (optional)
+   * @returns true if scanning is active
+   */
+  isScanning?(): boolean;
 }
 
 export interface RfidTag {

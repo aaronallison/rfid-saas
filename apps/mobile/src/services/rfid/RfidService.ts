@@ -20,6 +20,8 @@ export class RfidService {
   
   private statusListeners: ((status: ReaderStatus) => void)[] = [];
   private tagListeners: ((tag: RfidTag) => void)[] = [];
+  private isScanning = false;
+  private lastError: string | undefined;
 
   private constructor() {
     this.loadSettings();
@@ -44,30 +46,50 @@ export class RfidService {
    */
   async updateSettings(newSettings: Partial<ReaderSettings>): Promise<void> {
     const wasConnected = this.reader?.isConnected() || false;
+    const wasScanning = this.isScanning;
+    const previousReaderType = this.settings.readerType;
     
-    // Disconnect if reader type is changing
-    if (newSettings.readerType && newSettings.readerType !== this.settings.readerType && wasConnected) {
-      await this.disconnect();
-    }
-
-    this.settings = { ...this.settings, ...newSettings };
-    await this.saveSettings();
-    
-    // Create new reader instance if type changed
-    if (newSettings.readerType && newSettings.readerType !== this.reader?.getReaderType()) {
-      this.createReader();
-    }
-    
-    // Auto-reconnect if it was connected before
-    if (wasConnected && this.settings.autoConnect) {
-      try {
-        await this.connect();
-      } catch (error) {
-        console.error('Failed to auto-reconnect after settings change:', error);
+    try {
+      // Stop scanning if active before making changes
+      if (wasScanning) {
+        await this.stopInventory();
       }
-    }
+      
+      // Disconnect if reader type is changing
+      if (newSettings.readerType && newSettings.readerType !== this.settings.readerType && wasConnected) {
+        await this.disconnect();
+      }
 
-    this.notifyStatusListeners();
+      // Update settings
+      this.settings = { ...this.settings, ...newSettings };
+      await this.saveSettings();
+      
+      // Create new reader instance if type changed
+      if (newSettings.readerType && newSettings.readerType !== previousReaderType) {
+        this.createReader();
+      }
+      
+      // Auto-reconnect if it was connected before and autoConnect is enabled
+      if (wasConnected) {
+        try {
+          await this.connect();
+          
+          // Resume scanning if it was active before
+          if (wasScanning || this.settings.autoStartInventory) {
+            await this.startInventory();
+          }
+        } catch (error) {
+          console.error('Failed to reconnect after settings change:', error);
+          this.lastError = error instanceof Error ? error.message : 'Failed to reconnect';
+        }
+      }
+    } catch (error) {
+      console.error('Failed to update settings:', error);
+      this.lastError = error instanceof Error ? error.message : 'Settings update failed';
+      throw error;
+    } finally {
+      this.notifyStatusListeners();
+    }
   }
 
   /**
@@ -76,9 +98,9 @@ export class RfidService {
   getStatus(): ReaderStatus {
     return {
       isConnected: this.reader?.isConnected() || false,
-      isScanning: false, // We'll track this separately if needed
+      isScanning: this.isScanning,
       readerType: this.settings.readerType,
-      error: undefined, // We'll track errors if needed
+      error: this.lastError,
     };
   }
 
@@ -91,10 +113,14 @@ export class RfidService {
     }
 
     if (!this.reader) {
-      throw new Error('No reader available');
+      const error = 'No reader available';
+      this.lastError = error;
+      this.notifyStatusListeners();
+      throw new Error(error);
     }
 
     try {
+      this.lastError = undefined;
       await this.reader.connect();
       this.notifyStatusListeners();
       
@@ -102,6 +128,7 @@ export class RfidService {
         await this.startInventory();
       }
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Connection failed';
       this.notifyStatusListeners();
       throw error;
     }
@@ -114,7 +141,12 @@ export class RfidService {
     if (!this.reader) return;
 
     try {
+      this.lastError = undefined;
+      this.isScanning = false;
       await this.reader.disconnect();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Disconnect failed';
+      console.error('Error disconnecting from reader:', error);
     } finally {
       this.notifyStatusListeners();
     }
@@ -125,11 +157,22 @@ export class RfidService {
    */
   async startInventory(): Promise<void> {
     if (!this.reader || !this.reader.isConnected()) {
-      throw new Error('Reader not connected');
+      const error = 'Reader not connected';
+      this.lastError = error;
+      this.notifyStatusListeners();
+      throw new Error(error);
     }
 
-    await this.reader.startInventory();
-    this.notifyStatusListeners();
+    try {
+      this.lastError = undefined;
+      await this.reader.startInventory();
+      this.isScanning = true;
+      this.notifyStatusListeners();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Failed to start inventory';
+      this.notifyStatusListeners();
+      throw error;
+    }
   }
 
   /**
@@ -138,8 +181,17 @@ export class RfidService {
   async stopInventory(): Promise<void> {
     if (!this.reader) return;
 
-    await this.reader.stopInventory();
-    this.notifyStatusListeners();
+    try {
+      await this.reader.stopInventory();
+      this.isScanning = false;
+      this.lastError = undefined;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Failed to stop inventory';
+      this.isScanning = false; // Still mark as stopped even if error
+      console.error('Error stopping inventory:', error);
+    } finally {
+      this.notifyStatusListeners();
+    }
   }
 
   /**
@@ -150,62 +202,153 @@ export class RfidService {
   }
 
   /**
-   * Add a status change listener
+   * Check if inventory/scanning is currently active
    */
-  addStatusListener(listener: (status: ReaderStatus) => void): void {
-    this.statusListeners.push(listener);
+  isScanning(): boolean {
+    return this.isScanning;
   }
 
   /**
-   * Remove a status change listener
+   * Get the current reader instance (for advanced usage)
+   * @returns The current reader instance or null if none exists
    */
-  removeStatusListener(listener: (status: ReaderStatus) => void): void {
-    const index = this.statusListeners.indexOf(listener);
-    if (index > -1) {
-      this.statusListeners.splice(index, 1);
+  getCurrentReader(): IRfidReader | null {
+    return this.reader;
+  }
+
+  /**
+   * Get the number of active status listeners
+   */
+  getStatusListenerCount(): number {
+    return this.statusListeners.length;
+  }
+
+  /**
+   * Get the number of active tag listeners
+   */
+  getTagListenerCount(): number {
+    return this.tagListeners.length;
+  }
+
+  /**
+   * Add a status change listener
+   * @param listener Callback function that will be called when reader status changes
+   */
+  addStatusListener(listener: (status: ReaderStatus) => void): void {
+    if (!this.statusListeners.includes(listener)) {
+      this.statusListeners.push(listener);
     }
   }
 
   /**
+   * Remove a status change listener
+   * @param listener The listener function to remove
+   * @returns true if the listener was found and removed, false otherwise
+   */
+  removeStatusListener(listener: (status: ReaderStatus) => void): boolean {
+    const index = this.statusListeners.indexOf(listener);
+    if (index > -1) {
+      this.statusListeners.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Add a tag read listener
+   * @param listener Callback function that will be called when a tag is read
    */
   addTagListener(listener: (tag: RfidTag) => void): void {
-    this.tagListeners.push(listener);
-    
-    // If this is the first listener and we have a reader, set up the callback
-    if (this.tagListeners.length === 1 && this.reader) {
-      this.reader.onTagRead(this.handleTagRead);
+    if (!this.tagListeners.includes(listener)) {
+      this.tagListeners.push(listener);
+      
+      // If this is the first listener and we have a reader, set up the callback
+      if (this.tagListeners.length === 1 && this.reader) {
+        this.reader.onTagRead(this.handleTagRead);
+      }
     }
   }
 
   /**
    * Remove a tag read listener
+   * @param listener The listener function to remove
+   * @returns true if the listener was found and removed, false otherwise
    */
-  removeTagListener(listener: (tag: RfidTag) => void): void {
+  removeTagListener(listener: (tag: RfidTag) => void): boolean {
     const index = this.tagListeners.indexOf(listener);
     if (index > -1) {
       this.tagListeners.splice(index, 1);
-    }
 
-    // If no listeners remain, remove the reader callback
-    if (this.tagListeners.length === 0 && this.reader) {
-      this.reader.removeTagListener();
+      // If no listeners remain, remove the reader callback
+      if (this.tagListeners.length === 0 && this.reader) {
+        try {
+          this.reader.removeTagListener();
+        } catch (error) {
+          console.warn('Error removing tag listener from reader:', error);
+        }
+      }
+      return true;
     }
+    return false;
   }
 
   /**
    * Initialize the service (call this on app start)
    */
   async initialize(): Promise<void> {
-    await this.loadSettings();
-    this.createReader();
-    
-    if (this.settings.autoConnect) {
-      try {
-        await this.connect();
-      } catch (error) {
-        console.error('Auto-connect failed:', error);
+    try {
+      await this.loadSettings();
+      this.createReader();
+      
+      if (this.settings.autoConnect) {
+        try {
+          await this.connect();
+        } catch (error) {
+          console.error('Auto-connect failed:', error);
+          // Don't throw here - initialization should continue even if auto-connect fails
+        }
       }
+    } catch (error) {
+      console.error('Failed to initialize RFID service:', error);
+      this.lastError = error instanceof Error ? error.message : 'Initialization failed';
+      // Create a fallback mock reader if initialization completely fails
+      this.reader = new MockReader();
+      this.notifyStatusListeners();
+    }
+  }
+
+  /**
+   * Clean up resources and disconnect from reader
+   * Call this when the app is closing or the service is no longer needed
+   */
+  async cleanup(): Promise<void> {
+    try {
+      // Stop inventory if running
+      if (this.isScanning) {
+        await this.stopInventory();
+      }
+      
+      // Disconnect if connected
+      if (this.reader?.isConnected()) {
+        await this.disconnect();
+      }
+      
+      // Remove all listeners
+      if (this.reader) {
+        this.reader.removeTagListener();
+      }
+      
+      // Clear listener arrays
+      this.statusListeners = [];
+      this.tagListeners = [];
+      
+      // Reset state
+      this.reader = null;
+      this.isScanning = false;
+      this.lastError = undefined;
+      
+    } catch (error) {
+      console.error('Error during cleanup:', error);
     }
   }
 
@@ -215,28 +358,46 @@ export class RfidService {
   private createReader(): void {
     // Clean up existing reader
     if (this.reader) {
-      this.reader.removeTagListener();
+      try {
+        this.reader.removeTagListener();
+      } catch (error) {
+        console.warn('Error removing tag listener from old reader:', error);
+      }
     }
+
+    // Reset state when creating new reader
+    this.isScanning = false;
+    this.lastError = undefined;
 
     // Create new reader based on type
-    switch (this.settings.readerType) {
-      case 'mock':
-        this.reader = new MockReader();
-        break;
-      case 'ble':
-        this.reader = new BleReader();
-        break;
-      case 'vendor':
-        this.reader = new VendorReader();
-        break;
-      default:
-        console.error('Unknown reader type:', this.settings.readerType);
-        this.reader = new MockReader(); // Fallback to mock
-    }
+    try {
+      switch (this.settings.readerType) {
+        case 'mock':
+          this.reader = new MockReader();
+          break;
+        case 'ble':
+          this.reader = new BleReader();
+          break;
+        case 'vendor':
+          this.reader = new VendorReader();
+          break;
+        default:
+          console.error('Unknown reader type:', this.settings.readerType);
+          this.reader = new MockReader(); // Fallback to mock
+          this.lastError = `Unknown reader type: ${this.settings.readerType}. Using mock reader.`;
+      }
 
-    // Set up tag callback if we have listeners
-    if (this.tagListeners.length > 0) {
-      this.reader.onTagRead(this.handleTagRead);
+      // Set up tag callback if we have listeners
+      if (this.tagListeners.length > 0 && this.reader) {
+        this.reader.onTagRead(this.handleTagRead);
+      }
+    } catch (error) {
+      console.error('Error creating reader:', error);
+      this.lastError = error instanceof Error ? error.message : 'Failed to create reader';
+      this.reader = new MockReader(); // Fallback to mock reader
+      if (this.tagListeners.length > 0) {
+        this.reader.onTagRead(this.handleTagRead);
+      }
     }
   }
 
