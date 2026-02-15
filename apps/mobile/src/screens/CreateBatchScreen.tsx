@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -41,21 +41,25 @@ export default function CreateBatchScreen({ navigation }: Props) {
 
   useEffect(() => {
     loadSchemas();
-  }, []);
+  }, [selectedOrganization]);
 
-  const loadSchemas = async () => {
-    if (!selectedOrganization) return;
+  const loadSchemas = useCallback(async () => {
+    if (!selectedOrganization) {
+      setLoadingSchemas(false);
+      return;
+    }
 
     try {
+      setLoadingSchemas(true);
       const schemaList = await DatabaseService.getSchemas(selectedOrganization.id);
       setSchemas(schemaList);
     } catch (error) {
       console.error('Error loading schemas:', error);
-      Alert.alert('Error', 'Failed to load schemas');
+      Alert.alert('Error', 'Failed to load schemas. Please try again.');
     } finally {
       setLoadingSchemas(false);
     }
-  };
+  }, [selectedOrganization]);
 
   const handleCreateBatch = async () => {
     if (!batchName.trim()) {
@@ -99,6 +103,26 @@ export default function CreateBatchScreen({ navigation }: Props) {
     }
   };
 
+  const validateSchemaFields = () => {
+    const errors: string[] = [];
+    const fieldNames = new Set<string>();
+    
+    newSchemaFields.forEach((field, index) => {
+      if (!field.label?.trim()) {
+        errors.push(`Field ${index + 1}: Label is required`);
+      }
+      if (!field.name?.trim()) {
+        errors.push(`Field ${index + 1}: Name is required`);
+      } else if (fieldNames.has(field.name.toLowerCase())) {
+        errors.push(`Field ${index + 1}: Duplicate field name "${field.name}"`);
+      } else {
+        fieldNames.add(field.name.toLowerCase());
+      }
+    });
+    
+    return errors;
+  };
+
   const handleCreateSchema = async () => {
     if (!newSchemaName.trim()) {
       Alert.alert('Error', 'Please enter a schema name');
@@ -110,8 +134,23 @@ export default function CreateBatchScreen({ navigation }: Props) {
       return;
     }
 
+    const validationErrors = validateSchemaFields();
+    if (validationErrors.length > 0) {
+      Alert.alert('Validation Error', validationErrors.join('\n'));
+      return;
+    }
+
     if (!selectedOrganization) {
       Alert.alert('Error', 'No organization selected');
+      return;
+    }
+
+    // Check if schema name already exists
+    const existingSchema = schemas.find(s => 
+      s.name.toLowerCase() === newSchemaName.trim().toLowerCase()
+    );
+    if (existingSchema) {
+      Alert.alert('Error', 'A schema with this name already exists');
       return;
     }
 
@@ -141,14 +180,18 @@ export default function CreateBatchScreen({ navigation }: Props) {
       setSchemas([newSchema, ...schemas]);
       setSelectedSchema(newSchema);
       setShowCreateSchema(false);
-      setNewSchemaName('');
-      setNewSchemaFields([{ name: 'notes', type: 'text', required: false, label: 'Notes' }]);
+      resetSchemaForm();
     } catch (error) {
       console.error('Error creating schema:', error);
-      Alert.alert('Error', 'Failed to create schema');
+      Alert.alert('Error', 'Failed to create schema. Please try again.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const resetSchemaForm = () => {
+    setNewSchemaName('');
+    setNewSchemaFields([{ name: 'notes', type: 'text', required: false, label: 'Notes' }]);
   };
 
   const addSchemaField = () => {
@@ -161,6 +204,16 @@ export default function CreateBatchScreen({ navigation }: Props) {
   const updateSchemaField = (index: number, field: Partial<SchemaField>) => {
     const updatedFields = [...newSchemaFields];
     updatedFields[index] = { ...updatedFields[index], ...field };
+    
+    // Auto-generate field name from label if label is provided
+    if (field.label !== undefined) {
+      const name = field.label.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, '_')
+        .substring(0, 50); // Limit length
+      updatedFields[index].name = name;
+    }
+    
     setNewSchemaFields(updatedFields);
   };
 
@@ -174,16 +227,26 @@ export default function CreateBatchScreen({ navigation }: Props) {
     <View key={index} style={styles.fieldContainer}>
       <TextInput
         style={styles.fieldInput}
-        placeholder="Field Label"
+        placeholder="Field Label (e.g., Weight, Color)"
         value={field.label}
-        onChangeText={(text) => updateSchemaField(index, { label: text, name: text.toLowerCase().replace(/\s+/g, '_') })}
+        onChangeText={(text) => updateSchemaField(index, { label: text })}
+        accessibilityLabel={`Field ${index + 1} label`}
+        accessibilityHint="Enter a descriptive label for this field"
       />
       <TouchableOpacity
-        style={styles.removeFieldButton}
+        style={[
+          styles.removeFieldButton,
+          newSchemaFields.length === 1 && styles.removeFieldButtonDisabled
+        ]}
         onPress={() => removeSchemaField(index)}
         disabled={newSchemaFields.length === 1}
+        accessibilityLabel={`Remove field ${index + 1}`}
+        accessibilityRole="button"
       >
-        <Text style={[styles.removeFieldButtonText, newSchemaFields.length === 1 && styles.disabled]}>
+        <Text style={[
+          styles.removeFieldButtonText, 
+          newSchemaFields.length === 1 && styles.disabled
+        ]}>
           Remove
         </Text>
       </TouchableOpacity>
@@ -214,7 +277,10 @@ export default function CreateBatchScreen({ navigation }: Props) {
               style={styles.input}
               value={newSchemaName}
               onChangeText={setNewSchemaName}
-              placeholder="Enter schema name"
+              placeholder="Enter schema name (e.g., Product Info)"
+              accessibilityLabel="Schema name"
+              accessibilityHint="Enter a name for your new schema"
+              returnKeyType="next"
             />
 
             <Text style={styles.label}>Fields</Text>
@@ -227,7 +293,12 @@ export default function CreateBatchScreen({ navigation }: Props) {
             <View style={styles.buttonContainer}>
               <TouchableOpacity
                 style={[styles.button, styles.secondaryButton]}
-                onPress={() => setShowCreateSchema(false)}
+                onPress={() => {
+                  setShowCreateSchema(false);
+                  resetSchemaForm();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel schema creation"
               >
                 <Text style={styles.secondaryButtonText}>Cancel</Text>
               </TouchableOpacity>
@@ -264,7 +335,11 @@ export default function CreateBatchScreen({ navigation }: Props) {
             style={styles.input}
             value={batchName}
             onChangeText={setBatchName}
-            placeholder="Enter batch name"
+            placeholder="Enter batch name (e.g., Morning Inventory)"
+            accessibilityLabel="Batch name"
+            accessibilityHint="Enter a name for your new batch"
+            returnKeyType="done"
+            blurOnSubmit={true}
           />
 
           <Text style={styles.label}>Schema</Text>
@@ -274,6 +349,9 @@ export default function CreateBatchScreen({ navigation }: Props) {
               <TouchableOpacity
                 style={styles.createSchemaButton}
                 onPress={() => setShowCreateSchema(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Create new schema"
+                accessibilityHint="Create your first schema to define data fields"
               >
                 <Text style={styles.createSchemaButtonText}>Create Schema</Text>
               </TouchableOpacity>
@@ -289,6 +367,9 @@ export default function CreateBatchScreen({ navigation }: Props) {
                       selectedSchema?.id === schema.id && styles.schemaItemSelected,
                     ]}
                     onPress={() => setSelectedSchema(schema)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Select ${schema.name} schema`}
+                    accessibilityState={{ selected: selectedSchema?.id === schema.id }}
                   >
                     <Text style={[
                       styles.schemaItemText,
