@@ -17,6 +17,8 @@ export class RfidService {
     autoConnect: false,
     autoStartInventory: false,
   };
+  private isScanning: boolean = false;
+  private lastError: string | undefined = undefined;
   
   private statusListeners: ((status: ReaderStatus) => void)[] = [];
   private tagListeners: ((tag: RfidTag) => void)[] = [];
@@ -76,9 +78,9 @@ export class RfidService {
   getStatus(): ReaderStatus {
     return {
       isConnected: this.reader?.isConnected() || false,
-      isScanning: false, // We'll track this separately if needed
+      isScanning: this.isScanning,
       readerType: this.settings.readerType,
-      error: undefined, // We'll track errors if needed
+      error: this.lastError,
     };
   }
 
@@ -95,6 +97,7 @@ export class RfidService {
     }
 
     try {
+      this.lastError = undefined;
       await this.reader.connect();
       this.notifyStatusListeners();
       
@@ -102,6 +105,7 @@ export class RfidService {
         await this.startInventory();
       }
     } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Connection failed';
       this.notifyStatusListeners();
       throw error;
     }
@@ -114,7 +118,12 @@ export class RfidService {
     if (!this.reader) return;
 
     try {
+      this.isScanning = false;
+      this.lastError = undefined;
       await this.reader.disconnect();
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Disconnect failed';
+      throw error;
     } finally {
       this.notifyStatusListeners();
     }
@@ -128,8 +137,16 @@ export class RfidService {
       throw new Error('Reader not connected');
     }
 
-    await this.reader.startInventory();
-    this.notifyStatusListeners();
+    try {
+      await this.reader.startInventory();
+      this.isScanning = true;
+      this.lastError = undefined;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Failed to start scanning';
+      throw error;
+    } finally {
+      this.notifyStatusListeners();
+    }
   }
 
   /**
@@ -138,8 +155,16 @@ export class RfidService {
   async stopInventory(): Promise<void> {
     if (!this.reader) return;
 
-    await this.reader.stopInventory();
-    this.notifyStatusListeners();
+    try {
+      await this.reader.stopInventory();
+      this.isScanning = false;
+      this.lastError = undefined;
+    } catch (error) {
+      this.lastError = error instanceof Error ? error.message : 'Failed to stop scanning';
+      throw error;
+    } finally {
+      this.notifyStatusListeners();
+    }
   }
 
   /**

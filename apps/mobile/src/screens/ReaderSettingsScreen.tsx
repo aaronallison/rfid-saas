@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -48,16 +48,17 @@ export default function ReaderSettingsScreen() {
   };
 
   const handleReaderTypeChange = async (readerType: ReaderType) => {
-    if (!settings) return;
+    if (!settings || settings.readerType === readerType) return;
 
     setLoading(true);
     try {
       await rfidService.updateSettings({ ...settings, readerType });
       loadCurrentSettings();
       updateStatus();
+      Alert.alert('Success', `Switched to ${readerType} reader`);
     } catch (error) {
       console.error('Failed to update reader type:', error);
-      Alert.alert('Error', 'Failed to update reader type');
+      Alert.alert('Error', 'Failed to update reader type. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -73,7 +74,9 @@ export default function ReaderSettingsScreen() {
       await rfidService.updateSettings(newSettings);
     } catch (error) {
       console.error('Failed to update setting:', error);
-      Alert.alert('Error', 'Failed to update setting');
+      Alert.alert('Error', 'Failed to update setting. Your change has been reverted.');
+      // Revert the change on failure
+      setSettings(settings);
     }
   };
 
@@ -85,6 +88,7 @@ export default function ReaderSettingsScreen() {
     } catch (error) {
       console.error('Connection failed:', error);
       Alert.alert('Connection Failed', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
       setConnecting(false);
     }
   };
@@ -181,8 +185,14 @@ export default function ReaderSettingsScreen() {
           </View>
           <View style={styles.statusRow}>
             <Text style={styles.statusLabel}>Reader Type:</Text>
-            <Text style={styles.statusValue}>{status?.readerType}</Text>
+            <Text style={styles.statusValue}>{status?.readerType.toUpperCase()}</Text>
           </View>
+          {status?.isScanning && (
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Scanning:</Text>
+              <Text style={[styles.statusValue, styles.statusScanning]}>Active</Text>
+            </View>
+          )}
           {status?.error && (
             <View style={styles.statusRow}>
               <Text style={styles.statusLabel}>Error:</Text>
@@ -374,6 +384,10 @@ const styles = StyleSheet.create({
   },
   statusError: {
     color: '#FF3B30',
+    fontWeight: '600',
+  },
+  statusScanning: {
+    color: '#007AFF',
     fontWeight: '600',
   },
   buttonRow: {
