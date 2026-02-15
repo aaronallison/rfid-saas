@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { DatabaseService } from '../services/database';
-import { SyncService, SyncProgress } from '../services/syncService';
+import { SyncService, SyncProgress, SyncResult } from '../services/syncService';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SyncScreen() {
@@ -76,15 +76,21 @@ export default function SyncScreen() {
     });
 
     try {
-      await SyncService.syncToCloud((progress) => {
+      const result: SyncResult = await SyncService.syncToCloud((progress) => {
         setSyncProgress(progress);
       });
 
-      Alert.alert('Success', 'Data synced successfully');
+      if (result.success) {
+        Alert.alert('Success', `Synced ${result.totalSynced} items successfully`);
+      } else {
+        const errorMessages = result.errors.map(e => e.message).join('\n');
+        Alert.alert('Sync Completed with Errors', `${result.totalSynced} items synced\n\nErrors:\n${errorMessages}`);
+      }
+      
       await loadStats(); // Refresh stats
     } catch (error) {
       console.error('Sync error:', error);
-      Alert.alert('Sync Failed', `Error: ${error}`);
+      Alert.alert('Sync Failed', `Error: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setIsSyncing(false);
       setSyncProgress(null);
@@ -197,10 +203,17 @@ export default function SyncScreen() {
 
           {syncProgress.errors.length > 0 && (
             <View style={styles.errorsContainer}>
-              <Text style={styles.errorsTitle}>Errors:</Text>
-              {syncProgress.errors.map((error, index) => (
-                <Text key={index} style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorsTitle}>Errors ({syncProgress.errors.length}):</Text>
+              {syncProgress.errors.slice(0, 3).map((error, index) => (
+                <Text key={index} style={styles.errorText}>
+                  {error.type.toUpperCase()}: {error.message}
+                </Text>
               ))}
+              {syncProgress.errors.length > 3 && (
+                <Text style={styles.errorText}>
+                  ... and {syncProgress.errors.length - 3} more errors
+                </Text>
+              )}
             </View>
           )}
         </View>
