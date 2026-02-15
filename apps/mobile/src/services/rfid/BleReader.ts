@@ -72,8 +72,35 @@ export class BleReader implements IRfidReader {
     return this.connected;
   }
 
+  isScanning(): boolean {
+    return this.scanning;
+  }
+
   getReaderType(): string {
     return 'Generic BLE Reader';
+  }
+
+  getReaderInfo(): import('../../types/rfid').ReaderInfo {
+    return {
+      model: 'Generic BLE RFID Reader',
+      firmwareVersion: 'Unknown',
+      hardwareVersion: 'Unknown',
+      serialNumber: 'Unknown',
+      supportedFrequencies: [902000, 928000], // Typical UHF range
+      maxTxPower: 30,
+      minTxPower: 0,
+      antennaCount: 1,
+      supportedProtocols: ['EPC Gen2'],
+      capabilities: {
+        supportsPhase: false,
+        supportsRssi: true,
+        supportsTemperature: false,
+        supportsBattery: true,
+        supportsWriteTag: false,
+        supportsLockTag: false,
+        supportsKillTag: false,
+      },
+    };
   }
 
   /**

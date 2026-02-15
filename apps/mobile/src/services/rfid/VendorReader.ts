@@ -83,8 +83,35 @@ export class VendorReader implements IRfidReader {
     return this.connected;
   }
 
+  isScanning(): boolean {
+    return this.scanning;
+  }
+
   getReaderType(): string {
     return 'Vendor SDK Reader';
+  }
+
+  getReaderInfo(): import('../../types/rfid').ReaderInfo {
+    return {
+      model: 'Vendor SDK Reader',
+      firmwareVersion: 'Unknown',
+      hardwareVersion: 'Unknown',
+      serialNumber: 'Unknown',
+      supportedFrequencies: [902000, 904000, 906000, 908000, 910000, 912000, 914000, 916000, 918000, 920000, 922000, 924000, 926000, 928000],
+      maxTxPower: 32,
+      minTxPower: 0,
+      antennaCount: 4,
+      supportedProtocols: ['EPC Gen2', 'ISO 18000-6C'],
+      capabilities: {
+        supportsPhase: true,
+        supportsRssi: true,
+        supportsTemperature: true,
+        supportsBattery: false,
+        supportsWriteTag: true,
+        supportsLockTag: true,
+        supportsKillTag: true,
+      },
+    };
   }
 
   /**

@@ -96,8 +96,35 @@ export class MockReader implements IRfidReader {
     return this.connected;
   }
 
+  isScanning(): boolean {
+    return this.scanning;
+  }
+
   getReaderType(): string {
     return 'Mock Reader (Development)';
+  }
+
+  getReaderInfo(): import('../../types/rfid').ReaderInfo {
+    return {
+      model: 'Mock Reader v1.0',
+      firmwareVersion: '1.0.0',
+      hardwareVersion: '1.0.0',
+      serialNumber: 'MOCK001',
+      supportedFrequencies: [902000, 904000, 906000, 908000, 910000, 912000, 914000, 916000, 918000, 920000, 922000, 924000, 926000, 928000],
+      maxTxPower: 30,
+      minTxPower: 0,
+      antennaCount: 1,
+      supportedProtocols: ['EPC Gen2'],
+      capabilities: {
+        supportsPhase: true,
+        supportsRssi: true,
+        supportsTemperature: false,
+        supportsBattery: false,
+        supportsWriteTag: false,
+        supportsLockTag: false,
+        supportsKillTag: false,
+      },
+    };
   }
 
   private generateRandomTagRead(): void {

@@ -20,6 +20,9 @@ export class RfidService {
   
   private statusListeners: ((status: ReaderStatus) => void)[] = [];
   private tagListeners: ((tag: RfidTag) => void)[] = [];
+  private lastTagReadTime?: Date;
+  private sessionTagCount: number = 0;
+  private sessionStartTime?: Date;
 
   private constructor() {
     this.loadSettings();
@@ -76,9 +79,12 @@ export class RfidService {
   getStatus(): ReaderStatus {
     return {
       isConnected: this.reader?.isConnected() || false,
-      isScanning: false, // We'll track this separately if needed
+      isScanning: this.reader?.isScanning() || false,
       readerType: this.settings.readerType,
       error: undefined, // We'll track errors if needed
+      lastActivity: this.lastTagReadTime,
+      tagCount: this.sessionTagCount,
+      readRate: this.calculateReadRate(),
     };
   }
 
@@ -128,6 +134,8 @@ export class RfidService {
       throw new Error('Reader not connected');
     }
 
+    this.sessionStartTime = new Date();
+    this.sessionTagCount = 0;
     await this.reader.startInventory();
     this.notifyStatusListeners();
   }
@@ -249,6 +257,10 @@ export class RfidService {
       return;
     }
 
+    // Update session statistics
+    this.lastTagReadTime = new Date();
+    this.sessionTagCount++;
+
     // Notify all tag listeners
     this.tagListeners.forEach(listener => {
       try {
@@ -257,7 +269,28 @@ export class RfidService {
         console.error('Error in tag listener:', error);
       }
     });
+
+    // Notify status listeners with updated stats
+    this.notifyStatusListeners();
   };
+
+  /**
+   * Calculate current read rate (tags per second)
+   */
+  private calculateReadRate(): number {
+    if (!this.sessionStartTime || this.sessionTagCount === 0) {
+      return 0;
+    }
+
+    const sessionDurationMs = Date.now() - this.sessionStartTime.getTime();
+    const sessionDurationSec = sessionDurationMs / 1000;
+    
+    if (sessionDurationSec < 1) {
+      return 0;
+    }
+
+    return Math.round((this.sessionTagCount / sessionDurationSec) * 10) / 10; // Round to 1 decimal place
+  }
 
   /**
    * Notify all status listeners
