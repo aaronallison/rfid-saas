@@ -5,14 +5,16 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useAuth } from '../contexts/AuthContext';
 
 // Screens
-import LoginScreen from '../screens/LoginScreen';
-import OrganizationSelectScreen from '../screens/OrganizationSelectScreen';
-import BatchesListScreen from '../screens/BatchesListScreen';
-import CreateBatchScreen from '../screens/CreateBatchScreen';
-import CaptureScreen from '../screens/CaptureScreen';
-import SyncScreen from '../screens/SyncScreen';
-import ReaderSettingsScreen from '../screens/ReaderSettingsScreen';
-import TagStreamScreen from '../screens/TagStreamScreen';
+import {
+  LoginScreen,
+  OrganizationSelectScreen,
+  BatchesListScreen,
+  CreateBatchScreen,
+  CaptureScreen,
+  SyncScreen,
+  ReaderSettingsScreen,
+  TagStreamScreen,
+} from '../screens';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -57,7 +59,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="RFID"
-        component={RfidTabs}
+        component={RfidScreen}
         options={{
           tabBarLabel: 'RFID',
           headerShown: true,

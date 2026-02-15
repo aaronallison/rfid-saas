@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -57,12 +57,12 @@ export default function CaptureScreen({ route }: Props) {
       rfidService.removeStatusListener(handleReaderStatusChange);
       rfidService.removeTagListener(handleTagRead);
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadBatchSchema = async () => {
     try {
       // Get batch details to find schema
-      const batch = await new Promise<any>((resolve, reject) => {
+      const batch = await new Promise<{ schema_id: number }>((resolve, reject) => {
         const db = require('expo-sqlite').openDatabase('rfid_capture.db');
         db.transaction(tx => {
           tx.executeSql(
@@ -87,7 +87,7 @@ export default function CaptureScreen({ route }: Props) {
       setSchema(schemaData);
     } catch (error) {
       console.error('Error loading schema:', error);
-      Alert.alert('Error', 'Failed to load batch schema');
+      Alert.alert('Error', 'Failed to load batch schema. Please check that the batch exists and try again.');
     } finally {
       setLoadingSchema(false);
     }
@@ -116,11 +116,11 @@ export default function CaptureScreen({ route }: Props) {
     }
   };
 
-  const handleReaderStatusChange = (status: ReaderStatus) => {
+  const handleReaderStatusChange = useCallback((status: ReaderStatus) => {
     setReaderStatus(status);
-  };
+  }, []);
 
-  const handleTagRead = (tag: RfidTag) => {
+  const handleTagRead = useCallback((tag: RfidTag) => {
     // Auto-populate RFID tag field
     setRfidTag(tag.epc);
     
@@ -128,17 +128,20 @@ export default function CaptureScreen({ route }: Props) {
     if (autoCreateCapture && schema && location) {
       // Check if all required fields are filled (excluding RFID tag)
       const allRequiredFieldsFilled = schema.fields.every(field => 
-        !field.required || formData[field.name]
+        !field.required || (formData[field.name] !== undefined && formData[field.name] !== '')
       );
       
       if (allRequiredFieldsFilled) {
         createAutomaticCapture(tag);
       }
     }
-  };
+  }, [autoCreateCapture, schema, location, formData, createAutomaticCapture]);
 
   const createAutomaticCapture = async (tag: RfidTag) => {
-    if (!schema || !location) return;
+    if (!schema || !location) {
+      console.warn('Cannot create auto capture: missing schema or location', { schema: !!schema, location: !!location });
+      return;
+    }
 
     try {
       const capture: Omit<Capture, 'id'> = {
@@ -158,14 +161,15 @@ export default function CaptureScreen({ route }: Props) {
       setFormData({});
       
       // Refresh recent captures
-      loadRecentCaptures();
+      await loadRecentCaptures();
       
-      // Show brief success feedback
-      Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
+      // Show brief success feedback with truncated EPC for readability
+      const truncatedEpc = tag.epc.length > 12 ? `${tag.epc.substring(0, 12)}...` : tag.epc;
+      Alert.alert('Auto Capture', `Created capture for tag ${truncatedEpc}`, 
         [{ text: 'OK' }], { cancelable: true });
     } catch (error) {
       console.error('Error creating automatic capture:', error);
-      Alert.alert('Error', 'Failed to create automatic capture');
+      Alert.alert('Error', 'Failed to create automatic capture. Please try manual capture.');
     }
   };
 
@@ -208,7 +212,7 @@ export default function CaptureScreen({ route }: Props) {
       
       // Refresh location and recent captures
       getCurrentLocation();
-      loadRecentCaptures();
+      await loadRecentCaptures();
 
       Alert.alert('Success', 'Capture saved successfully');
     } catch (error) {
@@ -249,8 +253,11 @@ export default function CaptureScreen({ route }: Props) {
             key={field.name}
             style={styles.input}
             placeholder={`Enter ${field.label.toLowerCase()}`}
-            value={value.toString()}
-            onChangeText={(text) => updateFormData(field.name, parseFloat(text) || 0)}
+            value={value?.toString() || ''}
+            onChangeText={(text) => {
+              const numValue = text === '' ? undefined : parseFloat(text);
+              updateFormData(field.name, !isNaN(numValue!) ? numValue : undefined);
+            }}
             keyboardType="numeric"
           />
         );
