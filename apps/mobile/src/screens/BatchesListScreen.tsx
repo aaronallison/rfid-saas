@@ -13,9 +13,9 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { useAuth } from '../contexts/AuthContext';
 import { DatabaseService } from '../services/database';
 import { Batch } from '../types';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { BatchesStackParamList } from '../navigation/AppNavigator';
 
-type BatchesListScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Main'>;
+type BatchesListScreenNavigationProp = StackNavigationProp<BatchesStackParamList, 'BatchesList'>;
 
 interface Props {
   navigation: BatchesListScreenNavigationProp;

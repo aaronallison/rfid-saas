@@ -17,9 +17,9 @@ import { LocationService } from '../services/locationService';
 import { RfidService } from '../services/rfid';
 import { Schema, SchemaField, Capture } from '../types';
 import { RfidTag, ReaderStatus } from '../types/rfid';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { BatchesStackParamList } from '../navigation/AppNavigator';
 
-type CaptureScreenRouteProp = RouteProp<RootStackParamList, 'Capture'>;
+type CaptureScreenRouteProp = RouteProp<BatchesStackParamList, 'Capture'>;
 
 interface Props {
   route: CaptureScreenRouteProp;

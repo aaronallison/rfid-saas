@@ -18,24 +18,63 @@ export type RootStackParamList = {
   Login: undefined;
   OrganizationSelect: undefined;
   Main: undefined;
-  CreateBatch: undefined;
-  Capture: { batchId: number; batchName: string };
-  ReaderSettings: undefined;
-  TagStream: undefined;
 };
 
 export type MainTabParamList = {
-  Batches: undefined;
-  RFID: undefined;
+  BatchesTab: undefined;
+  RfidSettings: undefined;
+  TagStream: undefined;
   Sync: undefined;
+};
+
+export type BatchesStackParamList = {
+  BatchesList: undefined;
+  CreateBatch: undefined;
+  Capture: { batchId: number; batchName: string };
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const BatchesStack = createStackNavigator<BatchesStackParamList>();
 
-// Simple RFID screen with built-in tabs
-function RfidScreen() {
-  return <ReaderSettingsScreen />;
+// Batches Stack Navigator
+function BatchesStackNavigator() {
+  return (
+    <BatchesStack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: '#007AFF',
+        },
+        headerTintColor: '#fff',
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+      }}
+    >
+      <BatchesStack.Screen
+        name="BatchesList"
+        component={BatchesListScreen}
+        options={{ 
+          headerShown: false, // Will be handled by tab navigator
+        }}
+      />
+      <BatchesStack.Screen
+        name="CreateBatch"
+        component={CreateBatchScreen}
+        options={{ 
+          title: 'Create Batch',
+          presentation: 'modal',
+        }}
+      />
+      <BatchesStack.Screen
+        name="Capture"
+        component={CaptureScreen}
+        options={({ route }) => ({ 
+          title: `Capture - ${route.params.batchName}`,
+        })}
+      />
+    </BatchesStack.Navigator>
+  );
 }
 
 function MainTabs() {
@@ -45,21 +84,40 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#8E8E93',
+        tabBarStyle: {
+          paddingBottom: 8,
+          paddingTop: 8,
+          height: 70,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
       }}
     >
       <Tab.Screen
-        name="Batches"
-        component={BatchesListScreen}
+        name="BatchesTab"
+        component={BatchesStackNavigator}
         options={{
           tabBarLabel: 'Batches',
+          headerShown: true,
+          headerTitle: 'Batches',
+          headerStyle: {
+            backgroundColor: '#007AFF',
+          },
+          headerTitleStyle: {
+            color: '#fff',
+            fontWeight: 'bold',
+          },
+          headerTintColor: '#fff',
           // You can add tab icons here with tabBarIcon
         }}
       />
       <Tab.Screen
-        name="RFID"
-        component={RfidTabs}
+        name="RfidSettings"
+        component={ReaderSettingsScreen}
         options={{
-          tabBarLabel: 'RFID',
+          tabBarLabel: 'RFID Settings',
           headerShown: true,
           headerTitle: 'RFID Reader',
           headerStyle: {
@@ -69,6 +127,25 @@ function MainTabs() {
             color: '#fff',
             fontWeight: 'bold',
           },
+          headerTintColor: '#fff',
+          // You can add tab icons here with tabBarIcon
+        }}
+      />
+      <Tab.Screen
+        name="TagStream"
+        component={TagStreamScreen}
+        options={{
+          tabBarLabel: 'Tag Stream',
+          headerShown: true,
+          headerTitle: 'Tag Stream',
+          headerStyle: {
+            backgroundColor: '#007AFF',
+          },
+          headerTitleStyle: {
+            color: '#fff',
+            fontWeight: 'bold',
+          },
+          headerTintColor: '#fff',
           // You can add tab icons here with tabBarIcon
         }}
       />
@@ -77,6 +154,16 @@ function MainTabs() {
         component={SyncScreen}
         options={{
           tabBarLabel: 'Sync',
+          headerShown: true,
+          headerTitle: 'Sync',
+          headerStyle: {
+            backgroundColor: '#007AFF',
+          },
+          headerTitleStyle: {
+            color: '#fff',
+            fontWeight: 'bold',
+          },
+          headerTintColor: '#fff',
           // You can add tab icons here with tabBarIcon
         }}
       />
@@ -117,25 +204,11 @@ export default function AppNavigator() {
             options={{ title: 'Select Organization' }}
           />
         ) : (
-          <>
-            <Stack.Screen
-              name="Main"
-              component={MainTabs}
-              options={{ headerShown: false }}
-            />
-            <Stack.Screen
-              name="CreateBatch"
-              component={CreateBatchScreen}
-              options={{ title: 'Create Batch' }}
-            />
-            <Stack.Screen
-              name="Capture"
-              component={CaptureScreen}
-              options={({ route }) => ({ 
-                title: `Capture - ${route.params.batchName}` 
-              })}
-            />
-          </>
+          <Stack.Screen
+            name="Main"
+            component={MainTabs}
+            options={{ headerShown: false }}
+          />
         )}
       </Stack.Navigator>
     </NavigationContainer>
