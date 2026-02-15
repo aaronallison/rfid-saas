@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 17, 24, 39;
+  --background-rgb: 255, 255, 255;
+  --border-rgb: 229, 231, 235;
+  --primary-rgb: 59, 130, 246;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 243, 244, 246;
+    --background-rgb: 17, 24, 39;
+    --border-rgb: 75, 85, 99;
+    --primary-rgb: 96, 165, 250;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  color: rgb(var(--foreground-rgb));
+  background: rgb(var(--background-rgb));
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+}
+
+/* Focus styles for accessibility */
+:focus-visible {
+  outline: 2px solid rgb(var(--primary-rgb));
+  outline-offset: 2px;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
