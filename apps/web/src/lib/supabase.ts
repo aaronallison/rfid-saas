@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { createBrowserClient, createServerClient, type CookieOptions } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
 // Types for our database
 export interface Database {
@@ -163,8 +164,16 @@ export interface Database {
   }
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+// Environment variable validation
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+  throw new Error('Missing env.NEXT_PUBLIC_SUPABASE_URL')
+}
+if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  throw new Error('Missing env.NEXT_PUBLIC_SUPABASE_ANON_KEY')
+}
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 
 // Client-side Supabase client
 export function createBrowserSupabaseClient() {
@@ -172,25 +181,8 @@ export function createBrowserSupabaseClient() {
 }
 
 // Server-side Supabase client for Server Components
-export function createServerSupabaseClient(cookies: () => { get: (name: string) => { name: string; value: string } | undefined }) {
-  return createServerClient<Database>(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        get(name: string) {
-          const cookie = cookies().get(name)
-          return cookie?.value
-        },
-      },
-    }
-  )
-}
-
-// Server-side Supabase client for Route Handlers
-export function createRouteHandlerSupabaseClient(
-  request: Request,
-  response: Response
+export function createServerSupabaseClient(
+  cookieStore: ReturnType<typeof cookies>
 ) {
   return createServerClient<Database>(
     supabaseUrl,
@@ -198,21 +190,114 @@ export function createRouteHandlerSupabaseClient(
     {
       cookies: {
         get(name: string) {
-          return request.headers.get('cookie')
-            ?.split('; ')
-            ?.find(row => row.startsWith(`${name}=`))
-            ?.split('=')[1]
+          return cookieStore.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
-          response.headers.append('Set-Cookie', `${name}=${value}; Path=/; ${options.httpOnly ? 'HttpOnly;' : ''} ${options.secure ? 'Secure;' : ''} ${options.sameSite ? `SameSite=${options.sameSite};` : ''}`)
+          try {
+            cookieStore.set({ name, value, ...options })
+          } catch {
+            // The `set` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
         },
         remove(name: string, options: CookieOptions) {
-          response.headers.append('Set-Cookie', `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${options.httpOnly ? 'HttpOnly;' : ''} ${options.secure ? 'Secure;' : ''} ${options.sameSite ? `SameSite=${options.sameSite};` : ''}`)
+          try {
+            cookieStore.set({ name, value: '', ...options })
+          } catch {
+            // The `delete` method was called from a Server Component.
+            // This can be ignored if you have middleware refreshing
+            // user sessions.
+          }
         },
       },
     }
   )
 }
 
-// Default client for non-SSR contexts
+// Server-side Supabase client for Route Handlers (App Router)
+export function createRouteHandlerSupabaseClient(cookieStore: ReturnType<typeof cookies>) {
+  return createServerClient<Database>(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          cookieStore.set({ name, value, ...options })
+        },
+        remove(name: string, options: CookieOptions) {
+          cookieStore.set({ name, value: '', ...options })
+        },
+      },
+    }
+  )
+}
+
+// Legacy Route Handler client for compatibility with Request/Response pattern
+export function createLegacyRouteHandlerSupabaseClient(
+  request: Request
+) {
+  return createServerClient<Database>(
+    supabaseUrl,
+    supabaseAnonKey,
+    {
+      cookies: {
+        get(name: string) {
+          const cookieHeader = request.headers.get('cookie')
+          if (!cookieHeader) return undefined
+          
+          const cookies = cookieHeader.split('; ')
+          const cookie = cookies.find(row => row.startsWith(`${name}=`))
+          return cookie ? decodeURIComponent(cookie.split('=')[1]) : undefined
+        },
+        set() {
+          // Cannot set cookies in this pattern - should use middleware or new pattern
+        },
+        remove() {
+          // Cannot remove cookies in this pattern - should use middleware or new pattern
+        },
+      },
+    }
+  )
+}
+
+// Service role client for server-side operations with elevated permissions
+export function createServiceRoleSupabaseClient() {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Missing env.SUPABASE_SERVICE_ROLE_KEY')
+  }
+  
+  return createClient<Database>(
+    supabaseUrl,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    }
+  )
+}
+
+// Default client for non-SSR contexts (use sparingly - prefer the specific clients above)
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey)
+
+// Utility function to get user server-side
+export async function getCurrentUser(cookieStore: ReturnType<typeof cookies>) {
+  const supabase = createServerSupabaseClient(cookieStore)
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser()
+  
+  return { user, error }
+}
+
+// Type exports for convenience
+export type { Database }
+export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row']
+export type TablesInsert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert']
+export type TablesUpdate<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update']

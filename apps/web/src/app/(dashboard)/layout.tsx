@@ -9,7 +9,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode
 }) {
-  const supabase = createServerSupabaseClient(cookies)
+  const supabase = createServerSupabaseClient(cookies())
   
   const {
     data: { user },
