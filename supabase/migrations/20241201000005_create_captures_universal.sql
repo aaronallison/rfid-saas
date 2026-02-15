@@ -1,0 +1,42 @@
+-- Create captures_universal table
+CREATE TABLE captures_universal (
+    cntid BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    org_id UUID NOT NULL REFERENCES organizations(org_id),
+    batch_id UUID REFERENCES batches(batch_id),
+    type TEXT DEFAULT 'data',
+    f1 TEXT,
+    f2 TEXT,
+    f3 TEXT,
+    f4 TEXT,
+    f5 TEXT,
+    f6 TEXT,
+    f7 TEXT,
+    f8 TEXT,
+    f9 TEXT,
+    f10 TEXT,
+    f11 TEXT,
+    f12 TEXT,
+    f13 TEXT,
+    f14 TEXT,
+    f15 TEXT,
+    f16 TEXT,
+    f17 TEXT,
+    f18 TEXT,
+    f19 TEXT,
+    f20 TEXT,
+    f21 TEXT,
+    f22 TEXT,
+    f23 TEXT,
+    f24 TEXT,
+    f25 TEXT,
+    rfid_tag TEXT,
+    lat NUMERIC,
+    lng NUMERIC,
+    accuracy_m NUMERIC,
+    captured_at TIMESTAMPTZ NOT NULL,
+    source_device_id TEXT,
+    synced_at TIMESTAMPTZ
+);
+
+-- Enable Row Level Security
+ALTER TABLE captures_universal ENABLE ROW LEVEL SECURITY;
