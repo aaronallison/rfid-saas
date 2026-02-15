@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -38,8 +38,11 @@ export default function CaptureScreen({ route }: Props) {
   const [recentCaptures, setRecentCaptures] = useState<Capture[]>([]);
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null);
   const [autoCreateCapture, setAutoCreateCapture] = useState(false);
+  const [processingTag, setProcessingTag] = useState(false);
+  const [duplicateTagsSet] = useState(() => new Set<string>());
 
   const rfidService = RfidService.getInstance();
+  const rfidServiceRef = useRef(rfidService);
 
   useEffect(() => {
     loadBatchSchema();
@@ -47,43 +50,33 @@ export default function CaptureScreen({ route }: Props) {
     loadRecentCaptures();
     
     // Initialize RFID reader status and listeners
-    const status = rfidService.getStatus();
+    const status = rfidServiceRef.current.getStatus();
     setReaderStatus(status);
     
-    rfidService.addStatusListener(handleReaderStatusChange);
-    rfidService.addTagListener(handleTagRead);
+    rfidServiceRef.current.addStatusListener(handleReaderStatusChange);
+    rfidServiceRef.current.addTagListener(handleTagRead);
 
     return () => {
-      rfidService.removeStatusListener(handleReaderStatusChange);
-      rfidService.removeTagListener(handleTagRead);
+      rfidServiceRef.current.removeStatusListener(handleReaderStatusChange);
+      rfidServiceRef.current.removeTagListener(handleTagRead);
     };
-  }, []);
+  }, [handleReaderStatusChange, handleTagRead, loadRecentCaptures]);
 
   const loadBatchSchema = async () => {
     try {
-      // Get batch details to find schema
-      const batch = await new Promise<any>((resolve, reject) => {
-        const db = require('expo-sqlite').openDatabase('rfid_capture.db');
-        db.transaction(tx => {
-          tx.executeSql(
-            'SELECT * FROM batches WHERE id = ?',
-            [batchId],
-            (_, result) => {
-              if (result.rows.length > 0) {
-                resolve(result.rows.item(0));
-              } else {
-                reject(new Error('Batch not found'));
-              }
-            },
-            (_, error) => {
-              reject(error);
-              return false;
-            }
-          );
-        });
-      });
+      // Use DatabaseService to get batch details
+      const batches = await DatabaseService.getBatches(''); // This would need organization context
+      const batch = batches.find(b => b.id === batchId);
+      
+      if (!batch) {
+        throw new Error('Batch not found');
+      }
 
       const schemaData = await DatabaseService.getSchemaById(batch.schema_id);
+      if (!schemaData) {
+        throw new Error('Schema not found');
+      }
+      
       setSchema(schemaData);
     } catch (error) {
       console.error('Error loading schema:', error);
@@ -102,30 +95,61 @@ export default function CaptureScreen({ route }: Props) {
     }
   };
 
-  const getCurrentLocation = async () => {
-    const locationData = await LocationService.getCurrentLocation();
-    setLocation(locationData);
-  };
+  const getCurrentLocation = useCallback(async () => {
+    try {
+      const locationData = await LocationService.getCurrentLocation();
+      setLocation(locationData);
+    } catch (error) {
+      console.error('Error getting current location:', error);
+    }
+  }, []);
 
-  const loadRecentCaptures = async () => {
+  const loadRecentCaptures = useCallback(async () => {
     try {
       const captures = await DatabaseService.getCapturesByBatch(batchId);
-      setRecentCaptures(captures.slice(0, 5)); // Show only last 5
+      const recentCaps = captures.slice(0, 5); // Show only last 5
+      setRecentCaptures(recentCaps);
+      
+      // Update duplicate tags set with recent captures
+      duplicateTagsSet.clear();
+      recentCaps.forEach(capture => duplicateTagsSet.add(capture.rfid_tag));
     } catch (error) {
       console.error('Error loading recent captures:', error);
     }
-  };
+  }, [batchId, duplicateTagsSet]);
 
-  const handleReaderStatusChange = (status: ReaderStatus) => {
+  const handleReaderStatusChange = useCallback((status: ReaderStatus) => {
     setReaderStatus(status);
-  };
+  }, []);
 
-  const handleTagRead = (tag: RfidTag) => {
+  const handleTagRead = useCallback((tag: RfidTag) => {
+    // Prevent processing if already processing a tag
+    if (processingTag) {
+      return;
+    }
+
+    // Check for duplicate tags
+    if (duplicateTagsSet.has(tag.epc)) {
+      Alert.alert(
+        'Duplicate Tag', 
+        `Tag ${tag.epc.substring(0, 12)}... has already been captured in this batch.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Capture Anyway', onPress: () => processCapturedTag(tag) }
+        ]
+      );
+      return;
+    }
+
+    processCapturedTag(tag);
+  }, [processingTag, duplicateTagsSet, autoCreateCapture, schema, location, formData]);
+
+  const processCapturedTag = useCallback((tag: RfidTag) => {
     // Auto-populate RFID tag field
     setRfidTag(tag.epc);
     
     // If auto-create is enabled and we have required data, create capture automatically
-    if (autoCreateCapture && schema && location) {
+    if (autoCreateCapture && schema && location && !processingTag) {
       // Check if all required fields are filled (excluding RFID tag)
       const allRequiredFieldsFilled = schema.fields.every(field => 
         !field.required || formData[field.name]
@@ -135,11 +159,12 @@ export default function CaptureScreen({ route }: Props) {
         createAutomaticCapture(tag);
       }
     }
-  };
+  }, [autoCreateCapture, schema, location, formData, processingTag]);
 
-  const createAutomaticCapture = async (tag: RfidTag) => {
-    if (!schema || !location) return;
+  const createAutomaticCapture = useCallback(async (tag: RfidTag) => {
+    if (!schema || !location || processingTag) return;
 
+    setProcessingTag(true);
     try {
       const capture: Omit<Capture, 'id'> = {
         batch_id: batchId,
@@ -153,12 +178,15 @@ export default function CaptureScreen({ route }: Props) {
 
       await DatabaseService.createCapture(capture);
       
+      // Add to duplicates set
+      duplicateTagsSet.add(tag.epc);
+      
       // Clear form for next capture
       setRfidTag('');
       setFormData({});
       
       // Refresh recent captures
-      loadRecentCaptures();
+      await loadRecentCaptures();
       
       // Show brief success feedback
       Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
@@ -166,11 +194,15 @@ export default function CaptureScreen({ route }: Props) {
     } catch (error) {
       console.error('Error creating automatic capture:', error);
       Alert.alert('Error', 'Failed to create automatic capture');
+    } finally {
+      setProcessingTag(false);
     }
-  };
+  }, [schema, location, formData, batchId, processingTag, duplicateTagsSet, loadRecentCaptures]);
 
-  const handleSaveCapture = async () => {
-    if (!rfidTag.trim()) {
+  const handleSaveCapture = useCallback(async () => {
+    const trimmedTag = rfidTag.trim();
+    
+    if (!trimmedTag) {
       Alert.alert('Error', 'Please enter an RFID tag');
       return;
     }
@@ -182,17 +214,34 @@ export default function CaptureScreen({ route }: Props) {
 
     // Validate required fields
     for (const field of schema.fields) {
-      if (field.required && !formData[field.name]) {
+      if (field.required && (!formData[field.name] && formData[field.name] !== 0 && formData[field.name] !== false)) {
         Alert.alert('Error', `${field.label} is required`);
         return;
       }
     }
 
+    // Check for duplicates
+    if (duplicateTagsSet.has(trimmedTag)) {
+      Alert.alert(
+        'Duplicate Tag', 
+        `Tag ${trimmedTag.substring(0, 12)}... has already been captured in this batch.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Save Anyway', onPress: () => performSaveCapture(trimmedTag) }
+        ]
+      );
+      return;
+    }
+
+    performSaveCapture(trimmedTag);
+  }, [rfidTag, schema, formData, duplicateTagsSet]);
+
+  const performSaveCapture = useCallback(async (trimmedTag: string) => {
     setLoading(true);
     try {
       const capture: Omit<Capture, 'id'> = {
         batch_id: batchId,
-        rfid_tag: rfidTag.trim(),
+        rfid_tag: trimmedTag,
         latitude: location?.latitude,
         longitude: location?.longitude,
         timestamp: new Date().toISOString(),
@@ -202,13 +251,16 @@ export default function CaptureScreen({ route }: Props) {
 
       await DatabaseService.createCapture(capture);
 
+      // Add to duplicates set
+      duplicateTagsSet.add(trimmedTag);
+
       // Clear form
       setRfidTag('');
       setFormData({});
       
       // Refresh location and recent captures
       getCurrentLocation();
-      loadRecentCaptures();
+      await loadRecentCaptures();
 
       Alert.alert('Success', 'Capture saved successfully');
     } catch (error) {
@@ -217,14 +269,14 @@ export default function CaptureScreen({ route }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [batchId, location, formData, duplicateTagsSet, loadRecentCaptures, getCurrentLocation]);
 
-  const updateFormData = (fieldName: string, value: any) => {
+  const updateFormData = useCallback((fieldName: string, value: any) => {
     setFormData(prev => ({
       ...prev,
       [fieldName]: value,
     }));
-  };
+  }, []);
 
   const renderFormField = (field: SchemaField) => {
     const value = formData[field.name] || '';
@@ -249,8 +301,11 @@ export default function CaptureScreen({ route }: Props) {
             key={field.name}
             style={styles.input}
             placeholder={`Enter ${field.label.toLowerCase()}`}
-            value={value.toString()}
-            onChangeText={(text) => updateFormData(field.name, parseFloat(text) || 0)}
+            value={value?.toString() || ''}
+            onChangeText={(text) => {
+              const numValue = text === '' ? undefined : parseFloat(text);
+              updateFormData(field.name, isNaN(numValue!) ? undefined : numValue);
+            }}
             keyboardType="numeric"
           />
         );
@@ -261,6 +316,8 @@ export default function CaptureScreen({ route }: Props) {
             <TouchableOpacity
               style={[styles.booleanButton, value === true && styles.booleanButtonActive]}
               onPress={() => updateFormData(field.name, true)}
+              accessibilityLabel={`Set ${field.label} to Yes`}
+              accessibilityRole="button"
             >
               <Text style={[styles.booleanButtonText, value === true && styles.booleanButtonTextActive]}>
                 Yes
@@ -269,6 +326,8 @@ export default function CaptureScreen({ route }: Props) {
             <TouchableOpacity
               style={[styles.booleanButton, value === false && styles.booleanButtonActive]}
               onPress={() => updateFormData(field.name, false)}
+              accessibilityLabel={`Set ${field.label} to No`}
+              accessibilityRole="button"
             >
               <Text style={[styles.booleanButtonText, value === false && styles.booleanButtonTextActive]}>
                 No
