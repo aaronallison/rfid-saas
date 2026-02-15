@@ -56,24 +56,37 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
 
       if (error) {
         console.error('Error fetching organizations:', error)
-        return
+        throw error
       }
 
       const orgs = memberships?.map((m: any) => m.organizations).filter(Boolean) || []
       setOrganizations(orgs)
 
       // Set current org from localStorage or first org
-      const savedOrgId = localStorage.getItem('currentOrgId')
+      const savedOrgId = typeof window !== 'undefined' ? localStorage.getItem('currentOrgId') : null
       let targetOrg = orgs.find((org: Organization) => org.id === savedOrgId) || orgs[0]
       
       if (targetOrg) {
         setCurrentOrg(targetOrg)
         const membership = memberships?.find((m: any) => m.organizations?.id === targetOrg.id)
         setUserRole(membership?.role || null)
-        localStorage.setItem('currentOrgId', targetOrg.id)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('currentOrgId', targetOrg.id)
+        }
+      } else {
+        // Clear any stale data if no orgs found
+        setCurrentOrg(null)
+        setUserRole(null)
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('currentOrgId')
+        }
       }
     } catch (error) {
       console.error('Error in fetchOrganizations:', error)
+      // Reset state on error
+      setOrganizations([])
+      setCurrentOrg(null)
+      setUserRole(null)
     }
   }
 
@@ -81,7 +94,9 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
     const org = organizations.find(o => o.id === orgId)
     if (org) {
       setCurrentOrg(org)
-      localStorage.setItem('currentOrgId', orgId)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('currentOrgId', orgId)
+      }
       // Fetch user role for the new org
       if (user) {
         supabase
@@ -90,8 +105,15 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
           .eq('user_id', user.id)
           .eq('organization_id', orgId)
           .single()
-          .then(({ data }) => {
+          .then(({ data, error }) => {
+            if (error) {
+              console.error('Error fetching user role:', error)
+            }
             setUserRole(data?.role || null)
+          })
+          .catch((error) => {
+            console.error('Error in switchOrganization:', error)
+            setUserRole(null)
           })
       }
     }
@@ -134,7 +156,9 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
         setCurrentOrg(null)
         setOrganizations([])
         setUserRole(null)
-        localStorage.removeItem('currentOrgId')
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('currentOrgId')
+        }
       }
     })
 

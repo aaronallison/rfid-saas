@@ -189,9 +189,10 @@ export function createServerSupabaseClient(cookies: () => { get: (name: string) 
 
 // Server-side Supabase client for Route Handlers
 export function createRouteHandlerSupabaseClient(
-  request: Request,
-  response: Response
+  request: Request
 ) {
+  const response = new Response()
+  
   return createServerClient<Database>(
     supabaseUrl,
     supabaseAnonKey,
@@ -204,10 +205,28 @@ export function createRouteHandlerSupabaseClient(
             ?.split('=')[1]
         },
         set(name: string, value: string, options: CookieOptions) {
-          response.headers.append('Set-Cookie', `${name}=${value}; Path=/; ${options.httpOnly ? 'HttpOnly;' : ''} ${options.secure ? 'Secure;' : ''} ${options.sameSite ? `SameSite=${options.sameSite};` : ''}`)
+          const cookieString = [
+            `${name}=${value}`,
+            'Path=/',
+            options.httpOnly && 'HttpOnly',
+            options.secure && 'Secure',
+            options.sameSite && `SameSite=${options.sameSite}`,
+            options.maxAge && `Max-Age=${options.maxAge}`,
+          ].filter(Boolean).join('; ')
+          
+          response.headers.append('Set-Cookie', cookieString)
         },
         remove(name: string, options: CookieOptions) {
-          response.headers.append('Set-Cookie', `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; ${options.httpOnly ? 'HttpOnly;' : ''} ${options.secure ? 'Secure;' : ''} ${options.sameSite ? `SameSite=${options.sameSite};` : ''}`)
+          const cookieString = [
+            `${name}=`,
+            'Path=/',
+            'Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+            options.httpOnly && 'HttpOnly',
+            options.secure && 'Secure',
+            options.sameSite && `SameSite=${options.sameSite}`,
+          ].filter(Boolean).join('; ')
+          
+          response.headers.append('Set-Cookie', cookieString)
         },
       },
     }
