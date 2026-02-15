@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   FlatList,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -24,17 +25,36 @@ interface Props {
 export default function BatchesListScreen({ navigation }: Props) {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { selectedOrganization, signOut } = useAuth();
 
-  const loadBatches = async () => {
-    if (!selectedOrganization) return;
+  const loadBatches = async (showLoader: boolean = true) => {
+    if (!selectedOrganization) {
+      setLoading(false);
+      return;
+    }
+
+    if (showLoader) {
+      setLoading(true);
+    }
+    setError(null);
 
     try {
       const batchList = await DatabaseService.getBatches(selectedOrganization.id);
       setBatches(batchList);
-    } catch (error) {
-      console.error('Error loading batches:', error);
-      Alert.alert('Error', 'Failed to load batches');
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load batches';
+      console.error('Error loading batches:', err);
+      setError(errorMessage);
+      // Only show alert if not refreshing (to avoid interrupting pull-to-refresh)
+      if (!refreshing) {
+        Alert.alert('Error', errorMessage);
+      }
+    } finally {
+      if (showLoader) {
+        setLoading(false);
+      }
     }
   };
 
@@ -46,7 +66,7 @@ export default function BatchesListScreen({ navigation }: Props) {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadBatches();
+    await loadBatches(false); // Don't show main loader during refresh
     setRefreshing(false);
   };
 
@@ -55,6 +75,11 @@ export default function BatchesListScreen({ navigation }: Props) {
   };
 
   const handleBatchPress = (batch: Batch) => {
+    if (!batch.id) {
+      Alert.alert('Error', 'Invalid batch selected');
+      return;
+    }
+
     Alert.alert(
       batch.name,
       'What would you like to do?',
@@ -91,13 +116,16 @@ export default function BatchesListScreen({ navigation }: Props) {
     );
   };
 
-  const renderBatch = ({ item }: { item: Batch }) => (
+  const renderBatch = useCallback(({ item }: { item: Batch }) => (
     <TouchableOpacity
       style={styles.batchItem}
       onPress={() => handleBatchPress(item)}
+      activeOpacity={0.7}
     >
       <View style={styles.batchHeader}>
-        <Text style={styles.batchName}>{item.name}</Text>
+        <Text style={styles.batchName} numberOfLines={1}>
+          {item.name}
+        </Text>
         <View style={[styles.syncStatus, item.synced && styles.syncStatusSynced]}>
           <Text style={[styles.syncStatusText, item.synced && styles.syncStatusTextSynced]}>
             {item.synced ? 'Synced' : 'Pending'}
@@ -108,7 +136,13 @@ export default function BatchesListScreen({ navigation }: Props) {
         Created: {new Date(item.created_at).toLocaleDateString()}
       </Text>
     </TouchableOpacity>
-  );
+  ), []);
+
+  const getItemLayout = useCallback((data: any, index: number) => ({
+    length: 92, // Height: padding(20*2) + header(26) + marginBottom(8) + date(18) + marginBottom(12)
+    offset: 92 * index,
+    index,
+  }), []);
 
   return (
     <View style={styles.container}>
@@ -122,7 +156,23 @@ export default function BatchesListScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
 
-      {batches.length === 0 ? (
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Loading batches...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorTitle}>Unable to load batches</Text>
+          <Text style={styles.errorMessage}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={() => loadBatches()}
+          >
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : batches.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyTitle}>No Batches Yet</Text>
           <Text style={styles.emptyMessage}>
@@ -133,12 +183,17 @@ export default function BatchesListScreen({ navigation }: Props) {
         <FlatList
           data={batches}
           renderItem={renderBatch}
-          keyExtractor={(item) => item.id!.toString()}
+          keyExtractor={(item, index) => item.id?.toString() ?? `batch-${index}`}
+          getItemLayout={getItemLayout}
           style={styles.list}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
           }
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
         />
       )}
 
@@ -269,5 +324,46 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#FF3B30',
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  retryButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
