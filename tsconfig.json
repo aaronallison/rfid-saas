@@ -32,7 +32,9 @@
       "path": "./packages/shared"
     }
   ],
-  "include": [],
+  "include": [
+    "packages/*/src/**/*"
+  ],
   "exclude": [
     "node_modules",
     "dist",
