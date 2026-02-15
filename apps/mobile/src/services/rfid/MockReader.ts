@@ -1,10 +1,7 @@
-import { IRfidReader, RfidTag } from '../../types/rfid';
+import { RfidTag } from '../../types/rfid';
+import { BaseRfidReader } from './BaseRfidReader';
 
-export class MockReader implements IRfidReader {
-  private connected: boolean = false;
-  private scanning: boolean = false;
-  private inventoryInterval?: NodeJS.Timeout;
-  private tagCallback?: (tag: RfidTag) => void;
+export class MockReader extends BaseRfidReader {
   
   // Mock tag EPCs for testing
   private mockTags = [
@@ -21,80 +18,57 @@ export class MockReader implements IRfidReader {
   private tagReadCounts = new Map<string, number>();
 
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
+    await this.connectWithRetry(async () => {
       // Simulate connection delay
-      setTimeout(() => {
-        if (Math.random() > 0.1) { // 90% success rate
-          this.connected = true;
-          console.log('MockReader: Connected');
-          resolve();
-        } else {
-          reject(new Error('Mock connection failed'));
-        }
-      }, 1000 + Math.random() * 2000); // 1-3 second delay
+      await new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          if (Math.random() > 0.1) { // 90% success rate
+            console.log('MockReader: Connected');
+            resolve();
+          } else {
+            reject(new Error('Mock connection failed'));
+          }
+        }, 1000 + Math.random() * 2000); // 1-3 second delay
+      });
     });
   }
 
   async disconnect(): Promise<void> {
-    return new Promise((resolve) => {
-      this.stopInventory();
-      this.connected = false;
-      console.log('MockReader: Disconnected');
-      setTimeout(resolve, 500); // Small delay to simulate disconnect
-    });
+    await super.disconnect();
+    console.log('MockReader: Disconnected');
+    // Small delay to simulate disconnect
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 
   async startInventory(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (!this.connected) {
-        reject(new Error('Reader not connected'));
-        return;
+    if (!this.connected) {
+      throw new Error('Reader not connected');
+    }
+
+    if (this.scanning) {
+      return;
+    }
+
+    this.scanning = true;
+    this.tagReadCounts.clear();
+    console.log('MockReader: Starting inventory');
+
+    // Generate tag reads at random intervals
+    this.inventoryInterval = setInterval(() => {
+      if (this.tagCallback && this.scanning) {
+        this.generateRandomTagRead();
       }
-
-      if (this.scanning) {
-        resolve();
-        return;
-      }
-
-      this.scanning = true;
-      this.tagReadCounts.clear();
-      console.log('MockReader: Starting inventory');
-
-      // Generate tag reads at random intervals
-      this.inventoryInterval = setInterval(() => {
-        if (this.tagCallback && this.scanning) {
-          this.generateRandomTagRead();
-        }
-      }, 500 + Math.random() * 2000); // Random interval between 0.5-2.5 seconds
-
-      resolve();
-    });
+    }, 500 + Math.random() * 2000); // Random interval between 0.5-2.5 seconds
   }
 
   async stopInventory(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.inventoryInterval) {
-        clearInterval(this.inventoryInterval);
-        this.inventoryInterval = undefined;
-      }
-      
-      this.scanning = false;
-      console.log('MockReader: Stopped inventory');
-      setTimeout(resolve, 200);
-    });
+    await super.stopInventory();
+    console.log('MockReader: Stopped inventory');
+    // Small delay to simulate stop
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
-  onTagRead(callback: (tag: RfidTag) => void): void {
-    this.tagCallback = callback;
-  }
 
-  removeTagListener(): void {
-    this.tagCallback = undefined;
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
 
   getReaderType(): string {
     return 'Mock Reader (Development)';
@@ -118,7 +92,7 @@ export class MockReader implements IRfidReader {
     const frequency = 902000 + Math.random() * 26000; // In kHz
     
     const tag: RfidTag = {
-      epc: randomTag,
+      epc: this.normalizeEpc(randomTag),
       rssi: Math.round(rssi * 10) / 10, // Round to 1 decimal place
       timestamp: new Date(),
       phase: Math.round(phase * 100) / 100, // Round to 2 decimal places
@@ -126,8 +100,7 @@ export class MockReader implements IRfidReader {
       readCount: this.tagReadCounts.get(randomTag)!,
     };
 
-    if (this.tagCallback) {
-      this.tagCallback(tag);
-    }
+    // Use the base class method for handling tag reads
+    this.handleTagRead(tag);
   }
 }
