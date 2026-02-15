@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import { useAuth } from '../contexts/AuthContext';
 
 // Screens
@@ -30,12 +31,38 @@ export type MainTabParamList = {
   Sync: undefined;
 };
 
+export type RfidTabParamList = {
+  Settings: undefined;
+  TagStream: undefined;
+};
+
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const RfidTab = createMaterialTopTabNavigator<RfidTabParamList>();
 
-// Simple RFID screen with built-in tabs
-function RfidScreen() {
-  return <ReaderSettingsScreen />;
+// RFID screen with built-in tabs for settings and tag stream
+function RfidTabs() {
+  return (
+    <RfidTab.Navigator
+      screenOptions={{
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
+        tabBarIndicatorStyle: { backgroundColor: '#007AFF' },
+        tabBarStyle: { backgroundColor: '#fff' },
+      }}
+    >
+      <RfidTab.Screen
+        name="Settings"
+        component={ReaderSettingsScreen}
+        options={{ tabBarLabel: 'Settings' }}
+      />
+      <RfidTab.Screen
+        name="TagStream"
+        component={TagStreamScreen}
+        options={{ tabBarLabel: 'Tag Stream' }}
+      />
+    </RfidTab.Navigator>
+  );
 }
 
 function MainTabs() {

@@ -57,9 +57,16 @@ export default function CaptureScreen({ route }: Props) {
       rfidService.removeStatusListener(handleReaderStatusChange);
       rfidService.removeTagListener(handleTagRead);
     };
-  }, []);
+  }, [batchId]); // Add batchId dependency
 
   const loadBatchSchema = async () => {
+    if (!batchId) {
+      console.error('No batch ID provided');
+      Alert.alert('Error', 'Invalid batch ID');
+      setLoadingSchema(false);
+      return;
+    }
+
     try {
       // Get batch details to find schema
       const batch = await new Promise<any>((resolve, reject) => {
@@ -83,11 +90,20 @@ export default function CaptureScreen({ route }: Props) {
         });
       });
 
+      if (!batch?.schema_id) {
+        throw new Error('Batch has no associated schema');
+      }
+
       const schemaData = await DatabaseService.getSchemaById(batch.schema_id);
+      if (!schemaData) {
+        throw new Error('Schema not found');
+      }
+
       setSchema(schemaData);
     } catch (error) {
       console.error('Error loading schema:', error);
-      Alert.alert('Error', 'Failed to load batch schema');
+      const message = error instanceof Error ? error.message : 'Failed to load batch schema';
+      Alert.alert('Error', message);
     } finally {
       setLoadingSchema(false);
     }
@@ -117,28 +133,44 @@ export default function CaptureScreen({ route }: Props) {
   };
 
   const handleReaderStatusChange = (status: ReaderStatus) => {
-    setReaderStatus(status);
+    try {
+      setReaderStatus(status);
+    } catch (error) {
+      console.error('Error handling reader status change:', error);
+    }
   };
 
   const handleTagRead = (tag: RfidTag) => {
-    // Auto-populate RFID tag field
-    setRfidTag(tag.epc);
-    
-    // If auto-create is enabled and we have required data, create capture automatically
-    if (autoCreateCapture && schema && location) {
-      // Check if all required fields are filled (excluding RFID tag)
-      const allRequiredFieldsFilled = schema.fields.every(field => 
-        !field.required || formData[field.name]
-      );
-      
-      if (allRequiredFieldsFilled) {
-        createAutomaticCapture(tag);
+    try {
+      if (!tag?.epc) {
+        console.warn('Received tag with no EPC:', tag);
+        return;
       }
+
+      // Auto-populate RFID tag field
+      setRfidTag(tag.epc);
+      
+      // If auto-create is enabled and we have required data, create capture automatically
+      if (autoCreateCapture && schema && location) {
+        // Check if all required fields are filled (excluding RFID tag)
+        const allRequiredFieldsFilled = schema.fields.every(field => 
+          !field.required || formData[field.name] !== undefined && formData[field.name] !== ''
+        );
+        
+        if (allRequiredFieldsFilled) {
+          createAutomaticCapture(tag);
+        }
+      }
+    } catch (error) {
+      console.error('Error handling tag read:', error);
     }
   };
 
   const createAutomaticCapture = async (tag: RfidTag) => {
-    if (!schema || !location) return;
+    if (!schema || !location) {
+      console.warn('Cannot create automatic capture: missing schema or location');
+      return;
+    }
 
     try {
       const capture: Omit<Capture, 'id'> = {
@@ -158,14 +190,19 @@ export default function CaptureScreen({ route }: Props) {
       setFormData({});
       
       // Refresh recent captures
-      loadRecentCaptures();
+      await loadRecentCaptures();
       
-      // Show brief success feedback
-      Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
-        [{ text: 'OK' }], { cancelable: true });
+      // Show brief success feedback with shorter display time
+      Alert.alert(
+        'Auto Capture', 
+        `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
+        [{ text: 'OK' }], 
+        { cancelable: true }
+      );
     } catch (error) {
       console.error('Error creating automatic capture:', error);
-      Alert.alert('Error', 'Failed to create automatic capture');
+      const message = error instanceof Error ? error.message : 'Failed to create automatic capture';
+      Alert.alert('Error', message);
     }
   };
 
@@ -181,11 +218,13 @@ export default function CaptureScreen({ route }: Props) {
     }
 
     // Validate required fields
-    for (const field of schema.fields) {
-      if (field.required && !formData[field.name]) {
-        Alert.alert('Error', `${field.label} is required`);
-        return;
-      }
+    const missingFields = schema.fields
+      .filter(field => field.required && !formData[field.name])
+      .map(field => field.label);
+
+    if (missingFields.length > 0) {
+      Alert.alert('Error', `Required fields missing: ${missingFields.join(', ')}`);
+      return;
     }
 
     setLoading(true);
@@ -196,7 +235,7 @@ export default function CaptureScreen({ route }: Props) {
         latitude: location?.latitude,
         longitude: location?.longitude,
         timestamp: new Date().toISOString(),
-        data: formData,
+        data: { ...formData },
         synced: false,
       };
 
@@ -207,23 +246,32 @@ export default function CaptureScreen({ route }: Props) {
       setFormData({});
       
       // Refresh location and recent captures
-      getCurrentLocation();
-      loadRecentCaptures();
+      await Promise.all([
+        getCurrentLocation(),
+        loadRecentCaptures()
+      ]);
 
       Alert.alert('Success', 'Capture saved successfully');
     } catch (error) {
       console.error('Error saving capture:', error);
-      Alert.alert('Error', 'Failed to save capture');
+      const message = error instanceof Error ? error.message : 'Failed to save capture';
+      Alert.alert('Error', message);
     } finally {
       setLoading(false);
     }
   };
 
   const updateFormData = (fieldName: string, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      [fieldName]: value,
-    }));
+    setFormData(prev => {
+      // Avoid unnecessary re-renders if value hasn't changed
+      if (prev[fieldName] === value) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [fieldName]: value,
+      };
+    });
   };
 
   const renderFormField = (field: SchemaField) => {
@@ -249,8 +297,11 @@ export default function CaptureScreen({ route }: Props) {
             key={field.name}
             style={styles.input}
             placeholder={`Enter ${field.label.toLowerCase()}`}
-            value={value.toString()}
-            onChangeText={(text) => updateFormData(field.name, parseFloat(text) || 0)}
+            value={value ? value.toString() : ''}
+            onChangeText={(text) => {
+              const numValue = text === '' ? '' : parseFloat(text) || 0;
+              updateFormData(field.name, numValue);
+            }}
             keyboardType="numeric"
           />
         );
@@ -425,13 +476,17 @@ export default function CaptureScreen({ route }: Props) {
         {/* Recent Captures */}
         {recentCaptures.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recent Captures</Text>
-            {recentCaptures.map((capture, index) => (
-              <View key={capture.id} style={styles.captureItem}>
-                <Text style={styles.captureTag}>{capture.rfid_tag}</Text>
-                <Text style={styles.captureTime}>
-                  {new Date(capture.timestamp).toLocaleTimeString()}
-                </Text>
+            <Text style={styles.sectionTitle}>Recent Captures ({recentCaptures.length})</Text>
+            {recentCaptures.map((capture) => (
+              <View key={`${capture.id}-${capture.timestamp}`} style={styles.captureItem}>
+                <View style={styles.captureMainInfo}>
+                  <Text style={styles.captureTag} numberOfLines={1}>
+                    {capture.rfid_tag}
+                  </Text>
+                  <Text style={styles.captureTime}>
+                    {new Date(capture.timestamp).toLocaleTimeString()}
+                  </Text>
+                </View>
                 <View style={[styles.syncIndicator, capture.synced && styles.syncIndicatorSynced]}>
                   <Text style={[styles.syncIndicatorText, capture.synced && styles.syncIndicatorTextSynced]}>
                     {capture.synced ? '✓' : '○'}
