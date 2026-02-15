@@ -1,142 +1,70 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  Alert,
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { DatabaseService } from '../services/database';
-import { SyncService, SyncProgress } from '../services/syncService';
 import { useAuth } from '../contexts/AuthContext';
+import { useSyncData } from '../hooks/useSyncData';
 
 export default function SyncScreen() {
-  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [stats, setStats] = useState({
-    unsyncedBatches: 0,
-    unsyncedSchemas: 0,
-    unsyncedCaptures: 0,
-  });
-  const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const { selectedOrganization } = useAuth();
+  const {
+    syncProgress,
+    isSyncing,
+    isLoadingStats,
+    stats,
+    isOnline,
+    loadStats,
+    checkOnlineStatus,
+    syncToCloud,
+    manualResync,
+    getTotalUnsyncedItems,
+    getProgressPercentage,
+  } = useSyncData(selectedOrganization?.id);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadStats();
       checkOnlineStatus();
-    }, [])
+    }, [loadStats, checkOnlineStatus])
   );
 
-  const loadStats = async () => {
-    try {
-      const [batches, schemas, captures] = await Promise.all([
-        DatabaseService.getUnsyncedBatches(),
-        DatabaseService.getUnsyncedSchemas(),
-        DatabaseService.getUnsyncedCaptures(),
-      ]);
+  // Pre-calculated style objects to avoid inline object creation
+  const statusIndicatorStyle = [
+    styles.statusIndicator,
+    isOnline === true ? styles.statusOnline : 
+    isOnline === false ? styles.statusOffline : styles.statusChecking
+  ];
 
-      setStats({
-        unsyncedBatches: batches.length,
-        unsyncedSchemas: schemas.length,
-        unsyncedCaptures: captures.length,
-      });
-    } catch (error) {
-      console.error('Error loading sync stats:', error);
-    }
-  };
+  const syncButtonStyle = [
+    styles.syncButton,
+    (isSyncing || !isOnline || !selectedOrganization) && styles.buttonDisabled,
+  ];
 
-  const checkOnlineStatus = async () => {
-    const online = await SyncService.isOnline();
-    setIsOnline(online);
-  };
-
-  const handleSync = async () => {
-    if (!isOnline) {
-      Alert.alert('Offline', 'You need an internet connection to sync data');
-      return;
-    }
-
-    const totalItems = stats.unsyncedBatches + stats.unsyncedSchemas + stats.unsyncedCaptures;
-    if (totalItems === 0) {
-      Alert.alert('No Data', 'All data is already synced');
-      return;
-    }
-
-    setIsSyncing(true);
-    setSyncProgress({
-      totalItems: 0,
-      syncedItems: 0,
-      currentOperation: 'Starting sync...',
-      isComplete: false,
-      errors: [],
-    });
-
-    try {
-      await SyncService.syncToCloud((progress) => {
-        setSyncProgress(progress);
-      });
-
-      Alert.alert('Success', 'Data synced successfully');
-      await loadStats(); // Refresh stats
-    } catch (error) {
-      console.error('Sync error:', error);
-      Alert.alert('Sync Failed', `Error: ${error}`);
-    } finally {
-      setIsSyncing(false);
-      setSyncProgress(null);
-    }
-  };
-
-  const handleManualResync = () => {
-    Alert.alert(
-      'Manual Resync',
-      'This will mark all data as unsynced and attempt to sync everything again. Are you sure?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Resync All',
-          onPress: async () => {
-            try {
-              await SyncService.manualResync();
-              await loadStats();
-              Alert.alert('Success', 'All data marked for resync');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to reset sync status');
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const getProgressPercentage = () => {
-    if (!syncProgress || syncProgress.totalItems === 0) return 0;
-    return Math.round((syncProgress.syncedItems / syncProgress.totalItems) * 100);
-  };
+  const resyncButtonStyle = [
+    styles.resyncButton,
+    isSyncing && styles.buttonDisabled,
+  ];
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.header}>
         <Text style={styles.title}>Data Sync</Text>
-        <Text style={styles.subtitle}>{selectedOrganization?.name}</Text>
+        <Text style={styles.subtitle}>
+          {selectedOrganization?.name || 'No organization selected'}
+        </Text>
       </View>
 
       {/* Online Status */}
       <View style={styles.statusContainer}>
         <View style={styles.statusItem}>
           <Text style={styles.statusLabel}>Connection Status:</Text>
-          <View style={[
-            styles.statusIndicator,
-            isOnline === true ? styles.statusOnline : 
-            isOnline === false ? styles.statusOffline : styles.statusChecking
-          ]}>
+          <View style={statusIndicatorStyle}>
             <Text style={styles.statusText}>
               {isOnline === true ? 'Online' : 
                isOnline === false ? 'Offline' : 'Checking...'}
@@ -144,14 +72,22 @@ export default function SyncScreen() {
           </View>
         </View>
         
-        <TouchableOpacity style={styles.refreshButton} onPress={checkOnlineStatus}>
+        <TouchableOpacity 
+          style={styles.refreshButton} 
+          onPress={checkOnlineStatus}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh connection status"
+        >
           <Text style={styles.refreshButtonText}>Refresh</Text>
         </TouchableOpacity>
       </View>
 
       {/* Sync Stats */}
       <View style={styles.statsContainer}>
-        <Text style={styles.statsTitle}>Items Pending Sync</Text>
+        <View style={styles.statsHeader}>
+          <Text style={styles.statsTitle}>Items Pending Sync</Text>
+          {isLoadingStats && <ActivityIndicator size="small" color="#007AFF" />}
+        </View>
         
         <View style={styles.statItem}>
           <Text style={styles.statLabel}>Schemas:</Text>
@@ -171,7 +107,7 @@ export default function SyncScreen() {
         <View style={[styles.statItem, styles.statTotal]}>
           <Text style={styles.statTotalLabel}>Total:</Text>
           <Text style={styles.statTotalValue}>
-            {stats.unsyncedSchemas + stats.unsyncedBatches + stats.unsyncedCaptures}
+            {getTotalUnsyncedItems()}
           </Text>
         </View>
       </View>
@@ -209,30 +145,29 @@ export default function SyncScreen() {
       {/* Action Buttons */}
       <View style={styles.buttonsContainer}>
         <TouchableOpacity
-          style={[
-            styles.syncButton,
-            isSyncing && styles.buttonDisabled,
-            !isOnline && styles.buttonDisabled,
-          ]}
-          onPress={handleSync}
-          disabled={isSyncing || !isOnline}
+          style={syncButtonStyle}
+          onPress={syncToCloud}
+          disabled={isSyncing || !isOnline || !selectedOrganization}
+          accessibilityRole="button"
+          accessibilityLabel={
+            getTotalUnsyncedItems() > 0 ? 'Sync data to cloud' : 'All data synced'
+          }
         >
           {isSyncing ? (
             <ActivityIndicator color="white" />
           ) : (
             <Text style={styles.syncButtonText}>
-              {stats.unsyncedBatches + stats.unsyncedSchemas + stats.unsyncedCaptures > 0
-                ? 'Sync to Cloud'
-                : 'All Synced ✓'
-              }
+              {getTotalUnsyncedItems() > 0 ? 'Sync to Cloud' : 'All Synced ✓'}
             </Text>
           )}
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.resyncButton, isSyncing && styles.buttonDisabled]}
-          onPress={handleManualResync}
+          style={resyncButtonStyle}
+          onPress={manualResync}
           disabled={isSyncing}
+          accessibilityRole="button"
+          accessibilityLabel="Force resync all data"
         >
           <Text style={styles.resyncButtonText}>Force Resync All</Text>
         </TouchableOpacity>
@@ -240,8 +175,15 @@ export default function SyncScreen() {
         <TouchableOpacity
           style={styles.refreshStatsButton}
           onPress={loadStats}
+          disabled={isLoadingStats}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh sync statistics"
         >
-          <Text style={styles.refreshStatsButtonText}>Refresh Stats</Text>
+          {isLoadingStats ? (
+            <ActivityIndicator size="small" color="#007AFF" />
+          ) : (
+            <Text style={styles.refreshStatsButtonText}>Refresh Stats</Text>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -295,6 +237,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    // Add shadow for better visual separation
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   statusItem: {
     flex: 1,
@@ -341,12 +292,26 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 12,
     marginBottom: 24,
+    // Add shadow for better visual separation
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  statsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
   },
   statsTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 16,
   },
   statItem: {
     flexDirection: 'row',
@@ -384,6 +349,15 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 12,
     marginBottom: 24,
+    // Add shadow for better visual separation
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   progressTitle: {
     fontSize: 18,
@@ -418,6 +392,8 @@ const styles = StyleSheet.create({
     padding: 12,
     backgroundColor: '#FFF2F2',
     borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF3B30',
   },
   errorsTitle: {
     fontSize: 14,
@@ -429,6 +405,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#FF3B30',
     marginBottom: 4,
+    lineHeight: 16,
   },
   buttonsContainer: {
     gap: 16,
@@ -439,9 +416,20 @@ const styles = StyleSheet.create({
     padding: 18,
     borderRadius: 12,
     alignItems: 'center',
+    // Add shadow for better visual feedback
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   buttonDisabled: {
     backgroundColor: '#ccc',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   syncButtonText: {
     color: 'white',
@@ -476,6 +464,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     padding: 20,
     borderRadius: 12,
+    // Add shadow for better visual separation
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   helpTitle: {
     fontSize: 16,
