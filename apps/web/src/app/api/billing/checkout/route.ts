@@ -44,13 +44,13 @@ export async function POST(request: NextRequest) {
 
     // Verify user has access to the organization
     const { data: membership, error: membershipError } = await supabase
-      .from('organization_members')
+      .from('org_members')
       .select('role')
-      .eq('organization_id', org_id)
+      .eq('org_id', org_id)
       .eq('user_id', user.id)
       .single()
 
-    if (membershipError || !membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
+    if (membershipError || !membership || membership.role !== 'admin') {
       return NextResponse.json(
         { error: 'Insufficient permissions' },
         { status: 403 }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     const { data: org, error: orgError } = await supabase
       .from('organizations')
       .select('*')
-      .eq('id', org_id)
+      .eq('org_id', org_id)
       .single()
 
     if (orgError || !org) {

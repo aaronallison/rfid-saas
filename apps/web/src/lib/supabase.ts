@@ -7,60 +7,39 @@ export interface Database {
     Tables: {
       organizations: {
         Row: {
-          id: string
+          org_id: string
           name: string
-          slug: string
           created_at: string
-          updated_at: string
         }
         Insert: {
-          id?: string
+          org_id?: string
           name: string
-          slug: string
           created_at?: string
-          updated_at?: string
         }
         Update: {
-          id?: string
+          org_id?: string
           name?: string
-          slug?: string
           created_at?: string
-          updated_at?: string
         }
       }
-      organization_members: {
+      org_members: {
         Row: {
-          id: string
-          organization_id: string
+          org_id: string
           user_id: string
-          role: 'owner' | 'admin' | 'member'
-          invited_email: string | null
-          invited_at: string | null
-          joined_at: string | null
+          role: 'admin' | 'member'
           created_at: string
-          updated_at: string
         }
         Insert: {
-          id?: string
-          organization_id: string
-          user_id?: string
-          role?: 'owner' | 'admin' | 'member'
-          invited_email?: string | null
-          invited_at?: string | null
-          joined_at?: string | null
+          org_id: string
+          user_id: string
+          role: 'admin' | 'member'
           created_at?: string
-          updated_at?: string
         }
         Update: {
-          id?: string
-          organization_id?: string
+          org_id?: string
           user_id?: string
-          role?: 'owner' | 'admin' | 'member'
-          invited_email?: string | null
-          invited_at?: string | null
-          joined_at?: string | null
+          role?: 'admin' | 'member'
           created_at?: string
-          updated_at?: string
         }
       }
       batches: {
