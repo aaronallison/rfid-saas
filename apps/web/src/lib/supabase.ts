@@ -127,6 +127,29 @@ export interface Database {
           updated_at?: string
         }
       }
+      billing_org: {
+        Row: {
+          org_id: string
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          billing_status: 'trialing' | 'active' | 'past_due' | 'canceled' | null
+          updated_at: string
+        }
+        Insert: {
+          org_id: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          billing_status?: 'trialing' | 'active' | 'past_due' | 'canceled' | null
+          updated_at?: string
+        }
+        Update: {
+          org_id?: string
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          billing_status?: 'trialing' | 'active' | 'past_due' | 'canceled' | null
+          updated_at?: string
+        }
+      }
     }
     Views: {
       [_ in never]: never
