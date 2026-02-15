@@ -4,12 +4,19 @@ import { User, Organization } from '../types';
 import { Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
+  /** Current authenticated user with organization data */
   user: User | null;
+  /** Current Supabase session */
   session: Session | null;
+  /** Currently selected organization for the user */
   selectedOrganization: Organization | null;
+  /** Whether authentication state is being loaded */
   loading: boolean;
+  /** Sign in with email and password */
   signIn: (email: string, password: string) => Promise<void>;
+  /** Sign out the current user */
   signOut: () => Promise<void>;
+  /** Select an organization from the user's available organizations */
   selectOrganization: (org: Organization) => void;
 }
 
@@ -35,10 +42,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error('Error getting initial session:', error);
+        setLoading(false);
+        return;
+      }
+      
       setSession(session);
       if (session?.user) {
-        fetchUserData(session.user.id);
+        fetchUserData(session.user.id).catch((error) => {
+          console.error('Error fetching initial user data:', error);
+          setLoading(false);
+        });
       } else {
         setLoading(false);
       }
@@ -49,12 +65,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
       async (event, session) => {
         setSession(session);
         if (session?.user) {
-          await fetchUserData(session.user.id);
+          try {
+            await fetchUserData(session.user.id);
+          } catch (error) {
+            console.error('Error in auth state change handler:', error);
+            setLoading(false);
+          }
         } else {
           setUser(null);
           setSelectedOrganization(null);
+          setLoading(false);
         }
-        setLoading(false);
       }
     );
 
@@ -63,31 +84,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const fetchUserData = async (userId: string) => {
     try {
-      // Fetch user organizations
-      const { data: organizations, error } = await supabase
-        .from('user_organizations')
+      setLoading(true);
+      
+      // Get current session to avoid stale closure data
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      // Fetch user organizations using the correct table name
+      const { data: orgMembers, error } = await supabase
+        .from('org_members')
         .select(`
-          organization:organizations (
-            id,
+          organizations (
+            org_id,
             name,
             created_at
           )
         `)
         .eq('user_id', userId);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching user organizations:', error);
+        throw error;
+      }
 
-      const userOrgs = organizations?.map(item => item.organization) || [];
+      const userOrgs: Organization[] = orgMembers?.map(item => ({
+        id: item.organizations.org_id,
+        name: item.organizations.name,
+        created_at: item.organizations.created_at,
+      })) || [];
       
       const userData: User = {
         id: userId,
-        email: session?.user?.email || '',
+        email: currentSession?.user?.email || '',
         organizations: userOrgs,
       };
 
       setUser(userData);
     } catch (error) {
       console.error('Error fetching user data:', error);
+      // Reset user data on error
+      setUser(null);
+      setSelectedOrganization(null);
     } finally {
       setLoading(false);
     }
@@ -114,6 +150,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const selectOrganization = (org: Organization) => {
+    // Validate that the user has access to this organization
+    if (!user?.organizations.some(userOrg => userOrg.id === org.id)) {
+      console.error('User does not have access to organization:', org.id);
+      return;
+    }
     setSelectedOrganization(org);
   };
 
