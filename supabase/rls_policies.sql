@@ -4,8 +4,8 @@
 CREATE POLICY "Users can view organizations they belong to" ON organizations
     FOR SELECT USING (is_org_member(org_id));
 
-CREATE POLICY "Users can insert organizations" ON organizations
-    FOR INSERT WITH CHECK (true);
+CREATE POLICY "Authenticated users can create organizations" ON organizations
+    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY "Organization admins can update their organization" ON organizations
     FOR UPDATE USING (
@@ -31,33 +31,42 @@ CREATE POLICY "Organization admins can delete their organization" ON organizatio
 CREATE POLICY "Users can view members of organizations they belong to" ON org_members
     FOR SELECT USING (is_org_member(org_id));
 
-CREATE POLICY "Organization admins can insert members" ON org_members
+-- Special policy for initial organization creator (when org is first created)
+CREATE POLICY "Users can join as admin during org creation" ON org_members
+    FOR INSERT WITH CHECK (
+        auth.uid() = user_id 
+        AND role = 'admin'
+        AND NOT EXISTS (SELECT 1 FROM org_members WHERE org_id = org_members.org_id)
+    );
+
+-- Policy for admins to add other members
+CREATE POLICY "Organization admins can add members" ON org_members
     FOR INSERT WITH CHECK (
         EXISTS (
-            SELECT 1 FROM org_members om 
-            WHERE om.org_id = org_members.org_id 
-            AND om.user_id = auth.uid()
-            AND om.role = 'admin'
+            SELECT 1 FROM org_members existing 
+            WHERE existing.org_id = org_members.org_id 
+            AND existing.user_id = auth.uid()
+            AND existing.role = 'admin'
         )
     );
 
-CREATE POLICY "Organization admins can update members" ON org_members
+CREATE POLICY "Organization admins can update member roles" ON org_members
     FOR UPDATE USING (
         EXISTS (
-            SELECT 1 FROM org_members om 
-            WHERE om.org_id = org_members.org_id 
-            AND om.user_id = auth.uid()
-            AND om.role = 'admin'
+            SELECT 1 FROM org_members existing 
+            WHERE existing.org_id = org_members.org_id 
+            AND existing.user_id = auth.uid()
+            AND existing.role = 'admin'
         )
     );
 
-CREATE POLICY "Organization admins can delete members" ON org_members
+CREATE POLICY "Organization admins can remove members" ON org_members
     FOR DELETE USING (
         EXISTS (
-            SELECT 1 FROM org_members om 
-            WHERE om.org_id = org_members.org_id 
-            AND om.user_id = auth.uid()
-            AND om.role = 'admin'
+            SELECT 1 FROM org_members existing 
+            WHERE existing.org_id = org_members.org_id 
+            AND existing.user_id = auth.uid()
+            AND existing.role = 'admin'
         )
     );
 
@@ -85,11 +94,25 @@ CREATE POLICY "Organization admins can delete batches" ON batches
 CREATE POLICY "Users can view batch schemas in their organizations" ON batch_schema
     FOR SELECT USING (is_org_member(org_id));
 
-CREATE POLICY "Organization members can create batch schemas" ON batch_schema
-    FOR INSERT WITH CHECK (is_org_member(org_id));
+CREATE POLICY "Organization admins can create batch schemas" ON batch_schema
+    FOR INSERT WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM org_members 
+            WHERE org_members.org_id = batch_schema.org_id 
+            AND org_members.user_id = auth.uid()
+            AND org_members.role = 'admin'
+        )
+    );
 
-CREATE POLICY "Organization members can update batch schemas" ON batch_schema
-    FOR UPDATE USING (is_org_member(org_id));
+CREATE POLICY "Organization admins can update batch schemas" ON batch_schema
+    FOR UPDATE USING (
+        EXISTS (
+            SELECT 1 FROM org_members 
+            WHERE org_members.org_id = batch_schema.org_id 
+            AND org_members.user_id = auth.uid()
+            AND org_members.role = 'admin'
+        )
+    );
 
 CREATE POLICY "Organization admins can delete batch schemas" ON batch_schema
     FOR DELETE USING (
@@ -122,11 +145,38 @@ CREATE POLICY "Organization admins can delete captures" ON captures_universal
     );
 
 -- Billing_org policies
-CREATE POLICY "Users can view billing for their organizations" ON billing_org
-    FOR SELECT USING (is_org_member(org_id));
+CREATE POLICY "Organization admins can view billing" ON billing_org
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM org_members 
+            WHERE org_members.org_id = billing_org.org_id 
+            AND org_members.user_id = auth.uid()
+            AND org_members.role = 'admin'
+        )
+    );
 
-CREATE POLICY "Organization admins can manage billing" ON billing_org
-    FOR ALL USING (
+CREATE POLICY "Organization admins can create billing records" ON billing_org
+    FOR INSERT WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM org_members 
+            WHERE org_members.org_id = billing_org.org_id 
+            AND org_members.user_id = auth.uid()
+            AND org_members.role = 'admin'
+        )
+    );
+
+CREATE POLICY "Organization admins can update billing records" ON billing_org
+    FOR UPDATE USING (
+        EXISTS (
+            SELECT 1 FROM org_members 
+            WHERE org_members.org_id = billing_org.org_id 
+            AND org_members.user_id = auth.uid()
+            AND org_members.role = 'admin'
+        )
+    );
+
+CREATE POLICY "Organization admins can delete billing records" ON billing_org
+    FOR DELETE USING (
         EXISTS (
             SELECT 1 FROM org_members 
             WHERE org_members.org_id = billing_org.org_id 
