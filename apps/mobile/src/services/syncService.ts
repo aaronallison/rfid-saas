@@ -180,10 +180,11 @@ export class SyncService {
             id: capture.id,
             batch_id: capture.batch_id,
             rfid_tag: capture.rfid_tag,
+            field_data: capture.data, // Mobile 'data' maps to cloud 'field_data'
             latitude: capture.latitude,
             longitude: capture.longitude,
-            timestamp: capture.timestamp,
-            data: capture.data,
+            captured_at: capture.timestamp, // Mobile 'timestamp' maps to cloud 'captured_at'
+            source_device_id: null, // Could be derived from device info if available
           })));
 
         if (error) throw error;

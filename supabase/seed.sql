@@ -42,7 +42,7 @@ INSERT INTO batch_schema (
         'Last Checked', 'Warranty', 'Model', 'Serial', 'Cost'
     );
 
--- Insert test captures
+-- Insert test captures (captures_universal)
 INSERT INTO captures_universal (
     org_id, batch_id, type, f1, f2, f3, f4, f5,
     f6, f7, f8, f9, f10, rfid_tag, lat, lng, accuracy_m,
@@ -73,6 +73,33 @@ INSERT INTO captures_universal (
         'COMP-2024-001', 'Dell Workstation', 'IT Department', 'Alice Johnson', 'Active',
         '2024-01-10', '2026-12-31', 'OptiPlex 7090', 'DL7090-ABC123', '$1200',
         'E200341700102023073017EF', 40.7135, -74.0065, 4.2,
+        '2024-01-10 09:15:00'::timestamptz, 'DEVICE002'
+    );
+
+-- Insert test captures (regular captures table for mobile/web compatibility)
+INSERT INTO captures (
+    batch_id, rfid_tag, field_data, latitude, longitude, accuracy_m,
+    captured_at, source_device_id
+) VALUES
+    (
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'E200341700102023073015AB',
+        '{"Product Name": "Widget Pro 3000", "SKU": "WP3000-001", "Quantity": "50", "Location": "Warehouse A", "Inspector": "John Doe", "Date": "2024-01-15", "Notes": "All items accounted for", "Category": "Electronics", "Condition": "New", "Batch Number": "B2024-001"}',
+        40.7128, -74.0060, 3.5,
+        '2024-01-15 14:30:00'::timestamptz, 'DEVICE001'
+    ),
+    (
+        'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'E200341700102023073016CD',
+        '{"Product Name": "Gadget Ultra", "SKU": "GU-2023-042", "Quantity": "25", "Location": "Warehouse B", "Inspector": "Jane Smith", "Date": "2024-01-15", "Notes": "Minor scratches noted", "Category": "Electronics", "Condition": "Used", "Batch Number": "B2024-001"}',
+        40.7130, -74.0062, 2.8,
+        '2024-01-15 14:35:00'::timestamptz, 'DEVICE001'
+    ),
+    (
+        'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        'E200341700102023073017EF',
+        '{"Asset Tag": "COMP-2024-001", "Description": "Dell Workstation", "Department": "IT Department", "Employee": "Alice Johnson", "Status": "Active", "Last Checked": "2024-01-10", "Warranty": "2026-12-31", "Model": "OptiPlex 7090", "Serial": "DL7090-ABC123", "Cost": "$1200"}',
+        40.7135, -74.0065, 4.2,
         '2024-01-10 09:15:00'::timestamptz, 'DEVICE002'
     );
 

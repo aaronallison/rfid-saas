@@ -7,25 +7,19 @@ export interface Database {
     Tables: {
       organizations: {
         Row: {
-          id: string
+          org_id: string
           name: string
-          slug: string
           created_at: string
-          updated_at: string
         }
         Insert: {
-          id?: string
+          org_id?: string
           name: string
-          slug: string
           created_at?: string
-          updated_at?: string
         }
         Update: {
-          id?: string
+          org_id?: string
           name?: string
-          slug?: string
           created_at?: string
-          updated_at?: string
         }
       }
       organization_members: {
@@ -65,64 +59,67 @@ export interface Database {
       }
       batches: {
         Row: {
-          id: string
-          organization_id: string
-          name: string
-          description: string | null
-          status: 'active' | 'completed' | 'archived'
-          created_by: string
+          batch_id: string
+          org_id: string
+          created_by: string | null
           created_at: string
-          updated_at: string
+          status: 'open' | 'synced' | 'closed'
         }
         Insert: {
-          id?: string
-          organization_id: string
-          name: string
-          description?: string | null
-          status?: 'active' | 'completed' | 'archived'
-          created_by: string
+          batch_id?: string
+          org_id: string
+          created_by?: string | null
           created_at?: string
-          updated_at?: string
+          status?: 'open' | 'synced' | 'closed'
         }
         Update: {
-          id?: string
-          organization_id?: string
-          name?: string
-          description?: string | null
-          status?: 'active' | 'completed' | 'archived'
-          created_by?: string
+          batch_id?: string
+          org_id?: string
+          created_by?: string | null
           created_at?: string
-          updated_at?: string
+          status?: 'open' | 'synced' | 'closed'
         }
       }
       captures: {
         Row: {
-          id: string
+          id: number
           batch_id: string
           rfid_tag: string
           field_data: Record<string, any>
+          latitude: number | null
+          longitude: number | null
+          accuracy_m: number | null
           location: string | null
           captured_at: string
+          source_device_id: string | null
           created_at: string
           updated_at: string
         }
         Insert: {
-          id?: string
+          id?: number
           batch_id: string
           rfid_tag: string
-          field_data: Record<string, any>
+          field_data?: Record<string, any>
+          latitude?: number | null
+          longitude?: number | null
+          accuracy_m?: number | null
           location?: string | null
           captured_at: string
+          source_device_id?: string | null
           created_at?: string
           updated_at?: string
         }
         Update: {
-          id?: string
+          id?: number
           batch_id?: string
           rfid_tag?: string
           field_data?: Record<string, any>
+          latitude?: number | null
+          longitude?: number | null
+          accuracy_m?: number | null
           location?: string | null
           captured_at?: string
+          source_device_id?: string | null
           created_at?: string
           updated_at?: string
         }

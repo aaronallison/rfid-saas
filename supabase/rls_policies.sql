@@ -121,6 +121,48 @@ CREATE POLICY "Organization admins can delete captures" ON captures_universal
         )
     );
 
+-- Captures policies (for mobile/web app compatibility)
+CREATE POLICY "Users can view captures in their batch organizations" ON captures
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM batches b
+            JOIN org_members om ON om.org_id = b.org_id
+            WHERE b.batch_id = captures.batch_id 
+            AND om.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Organization members can insert captures" ON captures
+    FOR INSERT WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM batches b
+            JOIN org_members om ON om.org_id = b.org_id
+            WHERE b.batch_id = captures.batch_id 
+            AND om.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Organization members can update captures" ON captures
+    FOR UPDATE USING (
+        EXISTS (
+            SELECT 1 FROM batches b
+            JOIN org_members om ON om.org_id = b.org_id
+            WHERE b.batch_id = captures.batch_id 
+            AND om.user_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Organization admins can delete captures" ON captures
+    FOR DELETE USING (
+        EXISTS (
+            SELECT 1 FROM batches b
+            JOIN org_members om ON om.org_id = b.org_id
+            WHERE b.batch_id = captures.batch_id 
+            AND om.user_id = auth.uid()
+            AND om.role = 'admin'
+        )
+    );
+
 -- Billing_org policies
 CREATE POLICY "Users can view billing for their organizations" ON billing_org
     FOR SELECT USING (is_org_member(org_id));
