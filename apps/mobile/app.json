@@ -14,12 +14,18 @@
     },
     "ios": {
       "supportsTablet": true,
+      "buildNumber": "1",
+      "bundleIdentifier": "com.yourcompany.rfid-field-capture",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app uses location to tag RFID captures with GPS coordinates for field data collection.",
-        "NSCameraUsageDescription": "This app may use the camera to scan RFID tags or QR codes for data capture."
+        "NSCameraUsageDescription": "This app may use the camera to scan RFID tags or QR codes for data capture.",
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to RFID readers for field data capture.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to RFID readers for field data capture."
       }
     },
     "android": {
+      "versionCode": 1,
+      "package": "com.yourcompany.rfid_field_capture",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -30,7 +36,11 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN"
       ]
     },
     "web": {
