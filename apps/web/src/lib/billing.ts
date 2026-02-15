@@ -56,6 +56,10 @@ export async function getBillingInfo(
   org_id: string
 ): Promise<BillingInfo | null> {
   try {
+    if (!org_id) {
+      throw new Error('Organization ID is required')
+    }
+
     const { data, error } = await supabase
       .from('billing_org')
       .select('*')
@@ -64,16 +68,17 @@ export async function getBillingInfo(
 
     if (error) {
       if (error.code === 'PGRST116') {
+        // No billing record found, return null (valid case for free tier orgs)
         return null
       }
       console.error('Error getting billing info:', error)
-      return null
+      throw new Error('Failed to retrieve billing information')
     }
 
     return data
   } catch (error) {
     console.error('Error in getBillingInfo:', error)
-    return null
+    throw error
   }
 }
 
@@ -123,22 +128,37 @@ export async function checkFeatureAccess(
   canAddTeamMembers: boolean
   maxTeamSize: number
 }> {
-  const hasActiveBilling = await checkBillingStatus(supabase, org_id)
-
-  if (hasActiveBilling) {
-    return {
-      canSync: true,
-      canExport: true,
-      canAddTeamMembers: true,
-      maxTeamSize: 50 // Premium limit
+  try {
+    if (!org_id) {
+      throw new Error('Organization ID is required')
     }
-  }
 
-  // Free tier limits
-  return {
-    canSync: false,
-    canExport: false,
-    canAddTeamMembers: true,
-    maxTeamSize: 3 // Free tier limit
+    const hasActiveBilling = await checkBillingStatus(supabase, org_id)
+
+    if (hasActiveBilling) {
+      return {
+        canSync: true,
+        canExport: true,
+        canAddTeamMembers: true,
+        maxTeamSize: 50 // Premium limit
+      }
+    }
+
+    // Free tier limits
+    return {
+      canSync: false,
+      canExport: false,
+      canAddTeamMembers: true,
+      maxTeamSize: 3 // Free tier limit
+    }
+  } catch (error) {
+    console.error('Error in checkFeatureAccess:', error)
+    // Return restrictive access on error for security
+    return {
+      canSync: false,
+      canExport: false,
+      canAddTeamMembers: false,
+      maxTeamSize: 0
+    }
   }
 }

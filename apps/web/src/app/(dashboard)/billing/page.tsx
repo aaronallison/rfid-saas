@@ -28,6 +28,7 @@ export default function BillingPage() {
   })
   const [isLoading, setIsLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const supabase = createBrowserSupabaseClient()
 
@@ -55,15 +56,33 @@ export default function BillingPage() {
 
     try {
       setIsLoading(true)
-      const [billing, access] = await Promise.all([
-        getBillingInfo(supabase, currentOrg.id),
-        checkFeatureAccess(supabase, currentOrg.id)
-      ])
-      
+      setError(null)
+
+      // Use the new billing status API endpoint for better performance and security
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        throw new Error('Not authenticated')
+      }
+
+      const response = await fetch(`/api/billing/status?org_id=${currentOrg.id}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Failed to load billing data')
+      }
+
+      const { billing, features } = await response.json()
       setBillingInfo(billing)
-      setFeatureAccess(access)
+      setFeatureAccess(features)
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to load billing data'
       console.error('Error loading billing data:', error)
+      setError(errorMessage)
     } finally {
       setIsLoading(false)
     }
@@ -74,6 +93,7 @@ export default function BillingPage() {
 
     try {
       setActionLoading(true)
+      setError(null)
       
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
@@ -99,8 +119,9 @@ export default function BillingPage() {
         window.location.href = data.url
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start checkout process'
       console.error('Error creating checkout session:', error)
-      alert('Failed to start checkout process. Please try again.')
+      setError(errorMessage)
     } finally {
       setActionLoading(false)
     }
@@ -111,6 +132,7 @@ export default function BillingPage() {
 
     try {
       setActionLoading(true)
+      setError(null)
       
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
@@ -136,8 +158,9 @@ export default function BillingPage() {
         window.location.href = data.url
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to open billing portal'
       console.error('Error creating portal session:', error)
-      alert('Failed to open billing portal. Please try again.')
+      setError(errorMessage)
     } finally {
       setActionLoading(false)
     }
@@ -217,6 +240,20 @@ export default function BillingPage() {
               <AlertTriangle className="h-5 w-5 text-yellow-600" />
               <p className="text-yellow-800">
                 Checkout was canceled. No charges were made to your account.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <div className="flex items-center space-x-2">
+              <X className="h-5 w-5 text-red-600" />
+              <p className="text-red-800">
+                {error}
               </p>
             </div>
           </CardContent>
