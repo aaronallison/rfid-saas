@@ -1,13 +1,14 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { Database } from './supabase'
 
-export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'canceled'
+export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'canceled' | 'incomplete' | 'incomplete_expired' | 'unpaid'
 
 export interface BillingInfo {
   org_id: string
   stripe_customer_id: string | null
   stripe_subscription_id: string | null
   billing_status: BillingStatus | null
+  created_at: string
   updated_at: string
 }
 
@@ -38,6 +39,7 @@ export async function checkBillingStatus(
     }
 
     // Consider trialing and active as valid billing status
+    // Incomplete statuses should be treated as inactive
     return data.billing_status === 'active' || data.billing_status === 'trialing'
   } catch (error) {
     console.error('Error in checkBillingStatus:', error)
@@ -86,7 +88,7 @@ export async function getBillingInfo(
 export async function updateBillingInfo(
   supabase: SupabaseClient<Database>,
   org_id: string,
-  billingData: Partial<Omit<BillingInfo, 'org_id'>>
+  billingData: Partial<Omit<BillingInfo, 'org_id' | 'created_at' | 'updated_at'>>
 ): Promise<void> {
   try {
     const { error } = await supabase
@@ -94,7 +96,8 @@ export async function updateBillingInfo(
       .upsert({
         org_id,
         ...billingData,
-        updated_at: new Date().toISOString()
+        // created_at will be set automatically by database default for new records
+        // updated_at will be set automatically by the trigger
       })
 
     if (error) {

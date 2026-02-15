@@ -150,8 +150,11 @@ export default function BillingPage() {
       case 'trialing':
         return 'text-blue-600'
       case 'past_due':
+      case 'unpaid':
         return 'text-yellow-600'
       case 'canceled':
+      case 'incomplete':
+      case 'incomplete_expired':
         return 'text-red-600'
       default:
         return 'text-gray-600'
@@ -165,8 +168,11 @@ export default function BillingPage() {
       case 'trialing':
         return <Crown className="h-4 w-4 text-blue-600" />
       case 'past_due':
+      case 'unpaid':
         return <AlertTriangle className="h-4 w-4 text-yellow-600" />
       case 'canceled':
+      case 'incomplete':
+      case 'incomplete_expired':
         return <X className="h-4 w-4 text-red-600" />
       default:
         return <X className="h-4 w-4 text-gray-600" />
@@ -243,7 +249,8 @@ export default function BillingPage() {
                   <span className={getStatusColor(billingInfo.billing_status)}>
                     {billingInfo.billing_status === 'active' ? 'Pro Plan' : 
                      billingInfo.billing_status === 'trialing' ? 'Pro Plan (Trial)' :
-                     billingInfo.billing_status === 'past_due' ? 'Pro Plan (Payment Due)' :
+                     billingInfo.billing_status === 'past_due' || billingInfo.billing_status === 'unpaid' ? 'Pro Plan (Payment Due)' :
+                     billingInfo.billing_status === 'incomplete' || billingInfo.billing_status === 'incomplete_expired' ? 'Subscription Setup Failed' :
                      'Subscription Canceled'}
                   </span>
                 ) : (

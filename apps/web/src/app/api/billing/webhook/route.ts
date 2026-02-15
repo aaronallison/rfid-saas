@@ -88,7 +88,7 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
         stripe_customer_id: customerId,
         stripe_subscription_id: subscriptionId,
         billing_status: subscription.status as any,
-        updated_at: new Date().toISOString()
+        // created_at and updated_at are handled automatically by database
       })
 
     console.log(`Checkout completed for org ${org_id}, subscription ${subscriptionId}`)
@@ -113,21 +113,15 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
       return
     }
 
-    let billingStatus: string = subscription.status
-    
-    // Map Stripe subscription statuses to our billing statuses
-    if (subscription.status === 'incomplete' || subscription.status === 'incomplete_expired') {
-      billingStatus = 'canceled'
-    } else if (subscription.status === 'unpaid') {
-      billingStatus = 'past_due'
-    }
+    // Use subscription status directly since we now support all Stripe statuses
+    const billingStatus: string = subscription.status
 
     await supabase
       .from('billing_org')
       .update({
         stripe_subscription_id: subscription.id,
         billing_status: billingStatus as any,
-        updated_at: new Date().toISOString()
+        // updated_at is handled automatically by trigger
       })
       .eq('org_id', billingInfo.org_id)
 
@@ -157,7 +151,7 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       .from('billing_org')
       .update({
         billing_status: 'canceled',
-        updated_at: new Date().toISOString()
+        // updated_at is handled automatically by trigger
       })
       .eq('org_id', billingInfo.org_id)
 
