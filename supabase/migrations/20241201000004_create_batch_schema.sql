@@ -1,8 +1,8 @@
 -- Create batch_schema table
 CREATE TABLE batch_schema (
     schema_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    batch_id UUID NOT NULL REFERENCES batches(batch_id),
-    org_id UUID NOT NULL REFERENCES organizations(org_id),
+    batch_id UUID NOT NULL REFERENCES batches(batch_id) ON DELETE CASCADE,
+    org_id UUID NOT NULL REFERENCES organizations(org_id) ON DELETE CASCADE,
     col_1_name TEXT,
     col_2_name TEXT,
     col_3_name TEXT,
@@ -28,8 +28,15 @@ CREATE TABLE batch_schema (
     col_23_name TEXT,
     col_24_name TEXT,
     col_25_name TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    -- Ensure one schema per batch
+    UNIQUE(batch_id)
 );
+
+-- Create indexes for performance
+CREATE INDEX idx_batch_schema_org_id ON batch_schema(org_id);
+CREATE INDEX idx_batch_schema_batch_id ON batch_schema(batch_id);
 
 -- Enable Row Level Security
 ALTER TABLE batch_schema ENABLE ROW LEVEL SECURITY;
