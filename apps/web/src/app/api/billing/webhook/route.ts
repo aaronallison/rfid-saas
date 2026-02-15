@@ -2,17 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-})
+import { stripe, verifyWebhookSignature, mapSubscriptionStatus } from '@/lib/stripe'
 
 const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(request: NextRequest) {
   try {
@@ -29,7 +24,7 @@ export async function POST(request: NextRequest) {
     let event: Stripe.Event
 
     try {
-      event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
+      event = verifyWebhookSignature(body, signature)
     } catch (err) {
       console.error('Webhook signature verification failed:', err)
       return NextResponse.json(
@@ -113,14 +108,7 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
       return
     }
 
-    let billingStatus: string = subscription.status
-    
-    // Map Stripe subscription statuses to our billing statuses
-    if (subscription.status === 'incomplete' || subscription.status === 'incomplete_expired') {
-      billingStatus = 'canceled'
-    } else if (subscription.status === 'unpaid') {
-      billingStatus = 'past_due'
-    }
+    const billingStatus = mapSubscriptionStatus(subscription.status)
 
     await supabase
       .from('billing_org')

@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-})
+import { createStripeCustomer, createCheckoutSession } from '@/lib/stripe'
 
 const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -82,13 +78,11 @@ export async function POST(request: NextRequest) {
 
     // Create Stripe customer if doesn't exist
     if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
+      const customer = await createStripeCustomer({
+        email: user.email!,
         name: org.name,
-        metadata: {
-          org_id: org_id,
-          user_id: user.id,
-        },
+        orgId: org_id,
+        userId: user.id,
       })
       customerId = customer.id
 
@@ -103,22 +97,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create Stripe Checkout Session
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ['card'],
-      line_items: [
-        {
-          price: process.env.STRIPE_PRICE_ID!,
-          quantity: 1,
-        },
-      ],
-      mode: 'subscription',
-      success_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing?success=true`,
-      cancel_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing?canceled=true`,
-      metadata: {
-        org_id: org_id,
-        user_id: user.id,
-      },
+    const session = await createCheckoutSession({
+      customerId,
+      orgId: org_id,
+      userId: user.id,
     })
 
     return NextResponse.json({ url: session.url })

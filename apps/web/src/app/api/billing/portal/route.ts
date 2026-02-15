@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-})
+import { createPortalSession } from '@/lib/stripe'
 
 const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,9 +68,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Create Stripe Customer Portal Session
-    const session = await stripe.billingPortal.sessions.create({
-      customer: billingInfo.stripe_customer_id,
-      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing`,
+    const session = await createPortalSession({
+      customerId: billingInfo.stripe_customer_id,
     })
 
     return NextResponse.json({ url: session.url })
