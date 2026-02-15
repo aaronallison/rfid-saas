@@ -115,6 +115,32 @@ export class DatabaseService {
     });
   }
 
+  static async getBatchById(id: number): Promise<Batch | null> {
+    return new Promise((resolve, reject) => {
+      db.transaction(tx => {
+        tx.executeSql(
+          'SELECT * FROM batches WHERE id = ?',
+          [id],
+          (_, result) => {
+            if (result.rows.length === 0) {
+              resolve(null);
+              return;
+            }
+            const row = result.rows.item(0);
+            resolve({
+              ...row,
+              synced: row.synced === 1,
+            });
+          },
+          (_, error) => {
+            reject(error);
+            return false;
+          }
+        );
+      });
+    });
+  }
+
   static async getUnsyncedBatches(limit: number = 200): Promise<Batch[]> {
     return new Promise((resolve, reject) => {
       db.transaction(tx => {

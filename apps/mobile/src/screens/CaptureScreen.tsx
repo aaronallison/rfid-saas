@@ -61,33 +61,21 @@ export default function CaptureScreen({ route }: Props) {
 
   const loadBatchSchema = async () => {
     try {
-      // Get batch details to find schema
-      const batch = await new Promise<any>((resolve, reject) => {
-        const db = require('expo-sqlite').openDatabase('rfid_capture.db');
-        db.transaction(tx => {
-          tx.executeSql(
-            'SELECT * FROM batches WHERE id = ?',
-            [batchId],
-            (_, result) => {
-              if (result.rows.length > 0) {
-                resolve(result.rows.item(0));
-              } else {
-                reject(new Error('Batch not found'));
-              }
-            },
-            (_, error) => {
-              reject(error);
-              return false;
-            }
-          );
-        });
-      });
+      // Use DatabaseService to get batch details consistently
+      const batch = await DatabaseService.getBatchById(batchId);
+      if (!batch) {
+        throw new Error('Batch not found');
+      }
 
       const schemaData = await DatabaseService.getSchemaById(batch.schema_id);
+      if (!schemaData) {
+        throw new Error('Schema not found');
+      }
+      
       setSchema(schemaData);
     } catch (error) {
       console.error('Error loading schema:', error);
-      Alert.alert('Error', 'Failed to load batch schema');
+      Alert.alert('Error', 'Failed to load batch schema. Please check your connection and try again.');
     } finally {
       setLoadingSchema(false);
     }
@@ -128,7 +116,7 @@ export default function CaptureScreen({ route }: Props) {
     if (autoCreateCapture && schema && location) {
       // Check if all required fields are filled (excluding RFID tag)
       const allRequiredFieldsFilled = schema.fields.every(field => 
-        !field.required || formData[field.name]
+        !field.required || (formData[field.name] !== undefined && formData[field.name] !== '')
       );
       
       if (allRequiredFieldsFilled) {
@@ -138,7 +126,10 @@ export default function CaptureScreen({ route }: Props) {
   };
 
   const createAutomaticCapture = async (tag: RfidTag) => {
-    if (!schema || !location) return;
+    if (!schema || !location) {
+      console.warn('Cannot create automatic capture: missing schema or location');
+      return;
+    }
 
     try {
       const capture: Omit<Capture, 'id'> = {
@@ -158,19 +149,22 @@ export default function CaptureScreen({ route }: Props) {
       setFormData({});
       
       // Refresh recent captures
-      loadRecentCaptures();
+      await loadRecentCaptures();
       
       // Show brief success feedback
-      Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
+      const truncatedEpc = tag.epc.length > 12 ? `${tag.epc.substring(0, 12)}...` : tag.epc;
+      Alert.alert('Auto Capture', `Created capture for tag ${truncatedEpc}`, 
         [{ text: 'OK' }], { cancelable: true });
     } catch (error) {
       console.error('Error creating automatic capture:', error);
-      Alert.alert('Error', 'Failed to create automatic capture');
+      Alert.alert('Error', 'Failed to create automatic capture. Please try again.');
     }
   };
 
   const handleSaveCapture = async () => {
-    if (!rfidTag.trim()) {
+    const trimmedRfidTag = rfidTag.trim();
+    
+    if (!trimmedRfidTag) {
       Alert.alert('Error', 'Please enter an RFID tag');
       return;
     }
@@ -182,7 +176,7 @@ export default function CaptureScreen({ route }: Props) {
 
     // Validate required fields
     for (const field of schema.fields) {
-      if (field.required && !formData[field.name]) {
+      if (field.required && (formData[field.name] === undefined || formData[field.name] === '')) {
         Alert.alert('Error', `${field.label} is required`);
         return;
       }
@@ -192,7 +186,7 @@ export default function CaptureScreen({ route }: Props) {
     try {
       const capture: Omit<Capture, 'id'> = {
         batch_id: batchId,
-        rfid_tag: rfidTag.trim(),
+        rfid_tag: trimmedRfidTag,
         latitude: location?.latitude,
         longitude: location?.longitude,
         timestamp: new Date().toISOString(),
@@ -207,13 +201,15 @@ export default function CaptureScreen({ route }: Props) {
       setFormData({});
       
       // Refresh location and recent captures
-      getCurrentLocation();
-      loadRecentCaptures();
+      await Promise.all([
+        getCurrentLocation(),
+        loadRecentCaptures()
+      ]);
 
       Alert.alert('Success', 'Capture saved successfully');
     } catch (error) {
       console.error('Error saving capture:', error);
-      Alert.alert('Error', 'Failed to save capture');
+      Alert.alert('Error', 'Failed to save capture. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -249,8 +245,11 @@ export default function CaptureScreen({ route }: Props) {
             key={field.name}
             style={styles.input}
             placeholder={`Enter ${field.label.toLowerCase()}`}
-            value={value.toString()}
-            onChangeText={(text) => updateFormData(field.name, parseFloat(text) || 0)}
+            value={value?.toString() || ''}
+            onChangeText={(text) => {
+              const numericValue = text === '' ? undefined : parseFloat(text);
+              updateFormData(field.name, numericValue);
+            }}
             keyboardType="numeric"
           />
         );
