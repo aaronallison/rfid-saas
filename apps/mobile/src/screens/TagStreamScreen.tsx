@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ interface TagWithCount extends RfidTag {
   lastSeen: Date;
 }
 
+type TabType = 'stream' | 'unique';
+
 export default function TagStreamScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [tags, setTags] = useState<TagWithCount[]>([]);
@@ -23,33 +25,45 @@ export default function TagStreamScreen() {
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [sessionStartTime, setSessionStartTime] = useState<Date | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('unique');
 
   const rfidService = RfidService.getInstance();
   const flatListRef = useRef<FlatList>(null);
+  const isComponentMounted = useRef(true);
 
   useEffect(() => {
+    isComponentMounted.current = true;
+    
     // Get initial status
     const status = rfidService.getStatus();
-    setReaderStatus(status);
+    if (isComponentMounted.current) {
+      setReaderStatus(status);
+    }
 
     // Add listeners
     rfidService.addStatusListener(handleStatusChange);
     rfidService.addTagListener(handleTagRead);
 
     return () => {
+      isComponentMounted.current = false;
       rfidService.removeStatusListener(handleStatusChange);
       rfidService.removeTagListener(handleTagRead);
     };
   }, []);
 
-  const handleStatusChange = (status: ReaderStatus) => {
+  const handleStatusChange = useCallback((status: ReaderStatus) => {
+    if (!isComponentMounted.current) return;
+    
     setReaderStatus(status);
     setIsScanning(status.isScanning || false);
-  };
+  }, []);
 
-  const handleTagRead = (tag: RfidTag) => {
+  const handleTagRead = useCallback((tag: RfidTag) => {
+    if (!isComponentMounted.current) return;
+    
     const now = new Date();
     
+    // Update unique tags
     setUniqueTags(prev => {
       const newMap = new Map(prev);
       const existing = newMap.get(tag.epc);
@@ -65,7 +79,7 @@ export default function TagStreamScreen() {
       return newMap;
     });
 
-    // Add to stream (keep last 1000 reads)
+    // Add to stream (keep last 1000 reads for performance)
     setTags(prev => {
       const newTags = [{
         ...tag,
@@ -76,54 +90,77 @@ export default function TagStreamScreen() {
       return newTags.slice(0, 1000);
     });
 
-    // Scroll to top when new tag is read
-    setTimeout(() => {
-      if (flatListRef.current) {
-        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
-      }
-    }, 100);
-  };
+    // Scroll to top when new tag is read (only if on stream tab)
+    if (activeTab === 'stream') {
+      setTimeout(() => {
+        if (flatListRef.current && isComponentMounted.current) {
+          flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+        }
+      }, 100);
+    }
+  }, [activeTab]);
 
-  const handleStartScanning = async () => {
+  const handleStartScanning = useCallback(async () => {
     if (!readerStatus?.isConnected) {
-      Alert.alert('Error', 'Reader is not connected. Please connect first.');
+      Alert.alert(
+        'Reader Not Connected', 
+        'Please connect to the RFID reader first using the Settings tab.',
+        [{ text: 'OK' }]
+      );
       return;
     }
+
+    if (!isComponentMounted.current) return;
 
     setLoading(true);
     try {
       await rfidService.startInventory();
-      setSessionStartTime(new Date());
-      setIsScanning(true);
+      if (isComponentMounted.current) {
+        setSessionStartTime(new Date());
+        setIsScanning(true);
+      }
     } catch (error) {
       console.error('Start inventory failed:', error);
-      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to start scanning');
+      if (isComponentMounted.current) {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to start scanning';
+        Alert.alert('Scanning Error', errorMessage, [{ text: 'OK' }]);
+      }
     } finally {
-      setLoading(false);
+      if (isComponentMounted.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [readerStatus?.isConnected]);
 
-  const handleStopScanning = async () => {
+  const handleStopScanning = useCallback(async () => {
+    if (!isComponentMounted.current) return;
+
     setLoading(true);
     try {
       await rfidService.stopInventory();
-      setIsScanning(false);
+      if (isComponentMounted.current) {
+        setIsScanning(false);
+      }
     } catch (error) {
       console.error('Stop inventory failed:', error);
-      Alert.alert('Error', 'Failed to stop scanning');
+      if (isComponentMounted.current) {
+        Alert.alert('Error', 'Failed to stop scanning', [{ text: 'OK' }]);
+      }
     } finally {
-      setLoading(false);
+      if (isComponentMounted.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
-  const handleClearTags = () => {
+  const handleClearTags = useCallback(() => {
     Alert.alert(
-      'Clear Tags',
-      'This will clear all tag reads from the current session. Continue?',
+      'Clear Tag Data',
+      'This will clear all tag reads from the current session. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Clear', 
+          text: 'Clear All', 
           style: 'destructive',
           onPress: () => {
             setTags([]);
@@ -133,25 +170,26 @@ export default function TagStreamScreen() {
         },
       ]
     );
-  };
+  }, [isScanning]);
 
-  const formatTimestamp = (timestamp: Date) => {
+  // Memoized utility functions
+  const formatTimestamp = useCallback((timestamp: Date) => {
     return timestamp.toLocaleTimeString();
-  };
+  }, []);
 
-  const formatRssi = (rssi?: number) => {
+  const formatRssi = useCallback((rssi?: number) => {
     if (rssi === undefined) return '';
     return `${rssi} dBm`;
-  };
+  }, []);
 
-  const getReadCountColor = (count: number) => {
+  const getReadCountColor = useCallback((count: number) => {
     if (count === 1) return '#666';
     if (count < 5) return '#007AFF';
     if (count < 10) return '#FF9500';
     return '#FF3B30';
-  };
+  }, []);
 
-  const renderTagItem = ({ item }: { item: TagWithCount }) => (
+  const renderTagItem = useCallback(({ item }: { item: TagWithCount }) => (
     <View style={styles.tagItem}>
       <View style={styles.tagHeader}>
         <Text style={styles.tagEpc} numberOfLines={1}>
@@ -181,9 +219,9 @@ export default function TagStreamScreen() {
         )}
       </View>
     </View>
-  );
+  ), [getReadCountColor, formatTimestamp, formatRssi]);
 
-  const renderUniqueTagItem = ({ item }: { item: [string, TagWithCount] }) => {
+  const renderUniqueTagItem = useCallback(({ item }: { item: [string, TagWithCount] }) => {
     const [epc, tag] = item;
     const timeSinceLastSeen = (Date.now() - tag.lastSeen.getTime()) / 1000;
     
@@ -219,9 +257,9 @@ export default function TagStreamScreen() {
         </View>
       </View>
     );
-  };
+  }, [getReadCountColor, formatTimestamp, formatRssi]);
 
-  const TabButton = ({ title, active, onPress }: { 
+  const TabButton = useCallback(({ title, active, onPress }: { 
     title: string; 
     active: boolean; 
     onPress: () => void; 
@@ -229,14 +267,44 @@ export default function TagStreamScreen() {
     <TouchableOpacity
       style={[styles.tabButton, active && styles.tabButtonActive]}
       onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={title}
     >
       <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>
         {title}
       </Text>
     </TouchableOpacity>
-  );
+  ), []);
 
-  const [activeTab, setActiveTab] = useState<'stream' | 'unique'>('unique');
+  // Memoized computed values
+  const sessionDuration = useMemo(() => {
+    if (!sessionStartTime) return 0;
+    return Math.round((Date.now() - sessionStartTime.getTime()) / 1000 / 60);
+  }, [sessionStartTime]);
+
+  const uniqueTagsArray = useMemo(() => {
+    return Array.from(uniqueTags.entries());
+  }, [uniqueTags]);
+
+  const emptyListComponent = useMemo(() => {
+    const isUniqueTab = activeTab === 'unique';
+    return (
+      <View style={styles.emptyContainer}>
+        <Text style={styles.emptyText}>
+          {isUniqueTab ? 'No tags scanned yet' : 'No tag reads yet'}
+        </Text>
+        <Text style={styles.emptySubtext}>
+          {readerStatus?.isConnected 
+            ? isUniqueTab 
+              ? 'Start scanning to see unique RFID tags' 
+              : 'Start scanning to see live tag stream'
+            : 'Connect reader first in the Settings tab'
+          }
+        </Text>
+      </View>
+    );
+  }, [activeTab, readerStatus?.isConnected]);
 
   return (
     <View style={styles.container}>
@@ -255,7 +323,7 @@ export default function TagStreamScreen() {
         {sessionStartTime && (
           <View style={styles.statItem}>
             <Text style={styles.statValue}>
-              {Math.round((Date.now() - sessionStartTime.getTime()) / 1000 / 60)}m
+              {sessionDuration}m
             </Text>
             <Text style={styles.statLabel}>Session</Text>
           </View>
@@ -344,22 +412,20 @@ export default function TagStreamScreen() {
       <View style={styles.listContainer}>
         {activeTab === 'unique' ? (
           <FlatList
-            data={Array.from(uniqueTags.entries())}
+            data={uniqueTagsArray}
             keyExtractor={([epc]) => epc}
             renderItem={renderUniqueTagItem}
             style={styles.list}
             contentContainerStyle={uniqueTags.size === 0 ? styles.emptyList : undefined}
-            ListEmptyComponent={() => (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No tags scanned yet</Text>
-                <Text style={styles.emptySubtext}>
-                  {readerStatus?.isConnected 
-                    ? 'Start scanning to see RFID tags' 
-                    : 'Connect reader first'
-                  }
-                </Text>
-              </View>
-            )}
+            ListEmptyComponent={emptyListComponent}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={20}
+            windowSize={10}
+            getItemLayout={(data, index) => ({
+              length: 88, // Approximate height of uniqueTagItem
+              offset: 88 * index,
+              index,
+            })}
           />
         ) : (
           <FlatList
@@ -369,17 +435,15 @@ export default function TagStreamScreen() {
             renderItem={renderTagItem}
             style={styles.list}
             contentContainerStyle={tags.length === 0 ? styles.emptyList : undefined}
-            ListEmptyComponent={() => (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.emptyText}>No tag reads yet</Text>
-                <Text style={styles.emptySubtext}>
-                  {readerStatus?.isConnected 
-                    ? 'Start scanning to see live tag stream' 
-                    : 'Connect reader first'
-                  }
-                </Text>
-              </View>
-            )}
+            ListEmptyComponent={emptyListComponent}
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={30}
+            windowSize={15}
+            getItemLayout={(data, index) => ({
+              length: 80, // Approximate height of tagItem
+              offset: 80 * index,
+              index,
+            })}
           />
         )}
       </View>
