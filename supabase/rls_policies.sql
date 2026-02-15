@@ -4,8 +4,8 @@
 CREATE POLICY "Users can view organizations they belong to" ON organizations
     FOR SELECT USING (is_org_member(org_id));
 
-CREATE POLICY "Users can insert organizations" ON organizations
-    FOR INSERT WITH CHECK (true);
+CREATE POLICY "Authenticated users can insert organizations" ON organizations
+    FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 
 CREATE POLICY "Organization admins can update their organization" ON organizations
     FOR UPDATE USING (
@@ -33,11 +33,15 @@ CREATE POLICY "Users can view members of organizations they belong to" ON org_me
 
 CREATE POLICY "Organization admins can insert members" ON org_members
     FOR INSERT WITH CHECK (
-        EXISTS (
-            SELECT 1 FROM org_members om 
-            WHERE om.org_id = org_members.org_id 
-            AND om.user_id = auth.uid()
-            AND om.role = 'admin'
+        -- Allow first admin to be added during organization creation
+        auth.uid() IS NOT NULL AND (
+            EXISTS (
+                SELECT 1 FROM org_members om 
+                WHERE om.org_id = org_members.org_id 
+                AND om.user_id = auth.uid()
+                AND om.role = 'admin'
+            )
+            OR NOT EXISTS (SELECT 1 FROM org_members WHERE org_id = org_members.org_id)
         )
     );
 
