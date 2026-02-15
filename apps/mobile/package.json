@@ -1,12 +1,17 @@
 {
-  "name": "mobile",
+  "name": "@rfid-capture/mobile",
   "version": "1.0.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
+    "dev": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "build": "expo build",
+    "lint": "expo lint",
+    "type-check": "tsc --noEmit",
+    "clean": "expo r -c"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -28,7 +33,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
-    "typescript": "~5.9.2"
+    "typescript": "^5.3.3"
   },
   "private": true
 }
