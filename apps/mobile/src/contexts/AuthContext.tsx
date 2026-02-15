@@ -77,7 +77,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (error) throw error;
 
-      const userOrgs = organizations?.map(item => item.organization) || [];
+      const userOrgs = organizations?.map(item => item.organization).filter(Boolean) || [];
       
       const userData: User = {
         id: userId,
@@ -88,6 +88,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(userData);
     } catch (error) {
       console.error('Error fetching user data:', error);
+      // Set user with empty organizations on error
+      setUser({
+        id: userId,
+        email: session?.user?.email || '',
+        organizations: [],
+      });
     } finally {
       setLoading(false);
     }

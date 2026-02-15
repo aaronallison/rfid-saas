@@ -34,10 +34,6 @@ const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 // Simple RFID screen with built-in tabs
-function RfidScreen() {
-  return <ReaderSettingsScreen />;
-}
-
 function MainTabs() {
   return (
     <Tab.Navigator
@@ -57,7 +53,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="RFID"
-        component={RfidTabs}
+        component={ReaderSettingsScreen}
         options={{
           tabBarLabel: 'RFID',
           headerShown: true,
