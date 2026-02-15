@@ -14,7 +14,9 @@ import {
 import { RouteProp } from '@react-navigation/native';
 import { DatabaseService } from '../services/database';
 import { LocationService } from '../services/locationService';
+import { RfidService } from '../services/rfid';
 import { Schema, SchemaField, Capture } from '../types';
+import { RfidTag, ReaderStatus } from '../types/rfid';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 type CaptureScreenRouteProp = RouteProp<RootStackParamList, 'Capture'>;
@@ -34,11 +36,27 @@ export default function CaptureScreen({ route }: Props) {
   const [loadingSchema, setLoadingSchema] = useState(true);
   const [locationPermission, setLocationPermission] = useState<boolean | null>(null);
   const [recentCaptures, setRecentCaptures] = useState<Capture[]>([]);
+  const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null);
+  const [autoCreateCapture, setAutoCreateCapture] = useState(false);
+
+  const rfidService = RfidService.getInstance();
 
   useEffect(() => {
     loadBatchSchema();
     requestLocationPermission();
     loadRecentCaptures();
+    
+    // Initialize RFID reader status and listeners
+    const status = rfidService.getStatus();
+    setReaderStatus(status);
+    
+    rfidService.addStatusListener(handleReaderStatusChange);
+    rfidService.addTagListener(handleTagRead);
+
+    return () => {
+      rfidService.removeStatusListener(handleReaderStatusChange);
+      rfidService.removeTagListener(handleTagRead);
+    };
   }, []);
 
   const loadBatchSchema = async () => {
@@ -95,6 +113,59 @@ export default function CaptureScreen({ route }: Props) {
       setRecentCaptures(captures.slice(0, 5)); // Show only last 5
     } catch (error) {
       console.error('Error loading recent captures:', error);
+    }
+  };
+
+  const handleReaderStatusChange = (status: ReaderStatus) => {
+    setReaderStatus(status);
+  };
+
+  const handleTagRead = (tag: RfidTag) => {
+    // Auto-populate RFID tag field
+    setRfidTag(tag.epc);
+    
+    // If auto-create is enabled and we have required data, create capture automatically
+    if (autoCreateCapture && schema && location) {
+      // Check if all required fields are filled (excluding RFID tag)
+      const allRequiredFieldsFilled = schema.fields.every(field => 
+        !field.required || formData[field.name]
+      );
+      
+      if (allRequiredFieldsFilled) {
+        createAutomaticCapture(tag);
+      }
+    }
+  };
+
+  const createAutomaticCapture = async (tag: RfidTag) => {
+    if (!schema || !location) return;
+
+    try {
+      const capture: Omit<Capture, 'id'> = {
+        batch_id: batchId,
+        rfid_tag: tag.epc,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        timestamp: new Date().toISOString(),
+        data: { ...formData },
+        synced: false,
+      };
+
+      await DatabaseService.createCapture(capture);
+      
+      // Clear form for next capture
+      setRfidTag('');
+      setFormData({});
+      
+      // Refresh recent captures
+      loadRecentCaptures();
+      
+      // Show brief success feedback
+      Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
+        [{ text: 'OK' }], { cancelable: true });
+    } catch (error) {
+      console.error('Error creating automatic capture:', error);
+      Alert.alert('Error', 'Failed to create automatic capture');
     }
   };
 
@@ -242,7 +313,7 @@ export default function CaptureScreen({ route }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
-        {/* Location Status */}
+        {/* Status Container */}
         <View style={styles.statusContainer}>
           <View style={styles.statusItem}>
             <Text style={styles.statusLabel}>Location:</Text>
@@ -259,6 +330,16 @@ export default function CaptureScreen({ route }: Props) {
             </Text>
           </View>
           
+          <View style={styles.statusItem}>
+            <Text style={styles.statusLabel}>RFID Reader:</Text>
+            <Text style={[
+              styles.statusValue,
+              readerStatus?.isConnected ? styles.statusValueActive : styles.statusValueInactive
+            ]}>
+              {readerStatus?.isConnected ? 'Connected' : 'Disconnected'}
+            </Text>
+          </View>
+          
           {!locationPermission && (
             <TouchableOpacity
               style={styles.permissionButton}
@@ -267,6 +348,36 @@ export default function CaptureScreen({ route }: Props) {
               <Text style={styles.permissionButtonText}>Enable Location</Text>
             </TouchableOpacity>
           )}
+
+          {/* Auto-create toggle */}
+          <View style={styles.autoCreateContainer}>
+            <TouchableOpacity
+              style={[
+                styles.autoCreateToggle,
+                autoCreateCapture && styles.autoCreateToggleActive
+              ]}
+              onPress={() => setAutoCreateCapture(!autoCreateCapture)}
+            >
+              <View style={[
+                styles.toggleSwitch,
+                autoCreateCapture && styles.toggleSwitchActive
+              ]}>
+                <View style={[
+                  styles.toggleKnob,
+                  autoCreateCapture && styles.toggleKnobActive
+                ]} />
+              </View>
+              <Text style={[
+                styles.autoCreateLabel,
+                autoCreateCapture && styles.autoCreateLabelActive
+              ]}>
+                Auto-create captures
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.autoCreateDescription}>
+              Automatically create captures when RFID tags are read
+            </Text>
+          </View>
         </View>
 
         {/* RFID Input */}
@@ -517,5 +628,56 @@ const styles = StyleSheet.create({
   },
   syncIndicatorTextSynced: {
     color: 'white',
+  },
+  autoCreateContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  autoCreateToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  toggleSwitch: {
+    width: 50,
+    height: 28,
+    backgroundColor: '#ddd',
+    borderRadius: 14,
+    marginRight: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleSwitchActive: {
+    backgroundColor: '#34C759',
+  },
+  toggleKnob: {
+    width: 24,
+    height: 24,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+    alignSelf: 'flex-start',
+  },
+  toggleKnobActive: {
+    alignSelf: 'flex-end',
+  },
+  autoCreateLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  autoCreateLabelActive: {
+    color: '#34C759',
+  },
+  autoCreateDescription: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 16,
   },
 });

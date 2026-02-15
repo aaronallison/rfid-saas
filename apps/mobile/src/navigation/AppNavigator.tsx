@@ -11,6 +11,8 @@ import BatchesListScreen from '../screens/BatchesListScreen';
 import CreateBatchScreen from '../screens/CreateBatchScreen';
 import CaptureScreen from '../screens/CaptureScreen';
 import SyncScreen from '../screens/SyncScreen';
+import ReaderSettingsScreen from '../screens/ReaderSettingsScreen';
+import TagStreamScreen from '../screens/TagStreamScreen';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -18,15 +20,23 @@ export type RootStackParamList = {
   Main: undefined;
   CreateBatch: undefined;
   Capture: { batchId: number; batchName: string };
+  ReaderSettings: undefined;
+  TagStream: undefined;
 };
 
 export type MainTabParamList = {
   Batches: undefined;
+  RFID: undefined;
   Sync: undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+
+// Simple RFID screen with built-in tabs
+function RfidScreen() {
+  return <ReaderSettingsScreen />;
+}
 
 function MainTabs() {
   return (
@@ -42,6 +52,23 @@ function MainTabs() {
         component={BatchesListScreen}
         options={{
           tabBarLabel: 'Batches',
+          // You can add tab icons here with tabBarIcon
+        }}
+      />
+      <Tab.Screen
+        name="RFID"
+        component={RfidTabs}
+        options={{
+          tabBarLabel: 'RFID',
+          headerShown: true,
+          headerTitle: 'RFID Reader',
+          headerStyle: {
+            backgroundColor: '#007AFF',
+          },
+          headerTitleStyle: {
+            color: '#fff',
+            fontWeight: 'bold',
+          },
           // You can add tab icons here with tabBarIcon
         }}
       />
