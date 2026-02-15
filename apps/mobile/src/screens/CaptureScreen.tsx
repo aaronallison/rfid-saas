@@ -15,6 +15,7 @@ import { RouteProp } from '@react-navigation/native';
 import { DatabaseService } from '../services/database';
 import { LocationService } from '../services/locationService';
 import { RfidService } from '../services/rfid';
+import { CaptureService } from '../services/CaptureService';
 import { Schema, SchemaField, Capture } from '../types';
 import { RfidTag, ReaderStatus } from '../types/rfid';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -38,13 +39,16 @@ export default function CaptureScreen({ route }: Props) {
   const [recentCaptures, setRecentCaptures] = useState<Capture[]>([]);
   const [readerStatus, setReaderStatus] = useState<ReaderStatus | null>(null);
   const [autoCreateCapture, setAutoCreateCapture] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   const rfidService = RfidService.getInstance();
+  const captureService = CaptureService.getInstance();
 
   useEffect(() => {
     loadBatchSchema();
     requestLocationPermission();
     loadRecentCaptures();
+    setupCaptureService();
     
     // Initialize RFID reader status and listeners
     const status = rfidService.getStatus();
@@ -58,6 +62,26 @@ export default function CaptureScreen({ route }: Props) {
       rfidService.removeTagListener(handleTagRead);
     };
   }, []);
+
+  const setupCaptureService = () => {
+    // Configure auto-capture behavior
+    captureService.setAutoCaptureConfig({
+      enabled: autoCreateCapture,
+      requireLocation: true,
+      requireAllFields: true,
+      onAutoCapture: (capture) => {
+        loadRecentCaptures();
+        Alert.alert('Auto Capture', 
+          `Created capture for tag ${capture.rfid_tag.substring(0, 12)}...`, 
+          [{ text: 'OK' }], { cancelable: true }
+        );
+      }
+    });
+  };
+
+  useEffect(() => {
+    setupCaptureService();
+  }, [autoCreateCapture]);
 
   const loadBatchSchema = async () => {
     try {
@@ -109,8 +133,8 @@ export default function CaptureScreen({ route }: Props) {
 
   const loadRecentCaptures = async () => {
     try {
-      const captures = await DatabaseService.getCapturesByBatch(batchId);
-      setRecentCaptures(captures.slice(0, 5)); // Show only last 5
+      const captures = await captureService.getCapturesForBatch(batchId, { limit: 5 });
+      setRecentCaptures(captures);
     } catch (error) {
       console.error('Error loading recent captures:', error);
     }
@@ -120,87 +144,71 @@ export default function CaptureScreen({ route }: Props) {
     setReaderStatus(status);
   };
 
-  const handleTagRead = (tag: RfidTag) => {
+  const handleTagRead = async (tag: RfidTag) => {
     // Auto-populate RFID tag field
     setRfidTag(tag.epc);
     
-    // If auto-create is enabled and we have required data, create capture automatically
-    if (autoCreateCapture && schema && location) {
-      // Check if all required fields are filled (excluding RFID tag)
-      const allRequiredFieldsFilled = schema.fields.every(field => 
-        !field.required || formData[field.name]
-      );
-      
-      if (allRequiredFieldsFilled) {
-        createAutomaticCapture(tag);
+    // Check for duplicate captures
+    try {
+      const duplicate = await captureService.checkForDuplicate(tag.epc, batchId);
+      if (duplicate) {
+        Alert.alert(
+          'Duplicate Tag',
+          `This tag was already captured ${Math.floor((Date.now() - new Date(duplicate.timestamp).getTime()) / 60000)} minutes ago.`,
+          [
+            { text: 'Continue', style: 'default' },
+            { text: 'Cancel', style: 'cancel', onPress: () => setRfidTag('') }
+          ]
+        );
+      }
+    } catch (error) {
+      console.warn('Could not check for duplicates:', error);
+    }
+    
+    // Handle auto-capture if enabled
+    if (autoCreateCapture && schema) {
+      try {
+        const autoCapture = await captureService.handleAutomaticCapture(
+          tag, batchId, formData, schema
+        );
+        
+        if (autoCapture) {
+          // Clear form for next capture
+          setRfidTag('');
+          setFormData({});
+          setValidationErrors([]);
+        }
+      } catch (error) {
+        console.error('Auto-capture failed:', error);
       }
     }
   };
 
-  const createAutomaticCapture = async (tag: RfidTag) => {
-    if (!schema || !location) return;
-
-    try {
-      const capture: Omit<Capture, 'id'> = {
-        batch_id: batchId,
-        rfid_tag: tag.epc,
-        latitude: location.latitude,
-        longitude: location.longitude,
-        timestamp: new Date().toISOString(),
-        data: { ...formData },
-        synced: false,
-      };
-
-      await DatabaseService.createCapture(capture);
-      
-      // Clear form for next capture
-      setRfidTag('');
-      setFormData({});
-      
-      // Refresh recent captures
-      loadRecentCaptures();
-      
-      // Show brief success feedback
-      Alert.alert('Auto Capture', `Created capture for tag ${tag.epc.substring(0, 12)}...`, 
-        [{ text: 'OK' }], { cancelable: true });
-    } catch (error) {
-      console.error('Error creating automatic capture:', error);
-      Alert.alert('Error', 'Failed to create automatic capture');
-    }
-  };
-
   const handleSaveCapture = async () => {
-    if (!rfidTag.trim()) {
-      Alert.alert('Error', 'Please enter an RFID tag');
-      return;
-    }
-
     if (!schema) {
       Alert.alert('Error', 'Schema not loaded');
       return;
     }
 
-    // Validate required fields
-    for (const field of schema.fields) {
-      if (field.required && !formData[field.name]) {
-        Alert.alert('Error', `${field.label} is required`);
-        return;
-      }
+    // Validate input using CaptureService
+    const errors = captureService.validateCaptureData(formData, schema, rfidTag);
+    if (errors.length > 0) {
+      const errorMessages = errors.map(e => e.message);
+      setValidationErrors(errorMessages);
+      Alert.alert('Validation Error', errors[0].message);
+      return;
     }
 
     setLoading(true);
-    try {
-      const capture: Omit<Capture, 'id'> = {
-        batch_id: batchId,
-        rfid_tag: rfidTag.trim(),
-        latitude: location?.latitude,
-        longitude: location?.longitude,
-        timestamp: new Date().toISOString(),
-        data: formData,
-        synced: false,
-      };
+    setValidationErrors([]);
 
-      await DatabaseService.createCapture(capture);
+    try {
+      await captureService.createCapture({
+        rfidTag,
+        batchId,
+        formData,
+        location: location || undefined,
+      });
 
       // Clear form
       setRfidTag('');
@@ -213,7 +221,7 @@ export default function CaptureScreen({ route }: Props) {
       Alert.alert('Success', 'Capture saved successfully');
     } catch (error) {
       console.error('Error saving capture:', error);
-      Alert.alert('Error', 'Failed to save capture');
+      Alert.alert('Error', error instanceof Error ? error.message : 'Failed to save capture');
     } finally {
       setLoading(false);
     }
@@ -224,6 +232,11 @@ export default function CaptureScreen({ route }: Props) {
       ...prev,
       [fieldName]: value,
     }));
+    
+    // Clear validation errors when user starts entering data
+    if (validationErrors.length > 0) {
+      setValidationErrors([]);
+    }
   };
 
   const renderFormField = (field: SchemaField) => {
@@ -380,14 +393,32 @@ export default function CaptureScreen({ route }: Props) {
           </View>
         </View>
 
+        {/* Validation Errors */}
+        {validationErrors.length > 0 && (
+          <View style={styles.errorContainer}>
+            {validationErrors.map((error, index) => (
+              <Text key={index} style={styles.errorText}>• {error}</Text>
+            ))}
+          </View>
+        )}
+
         {/* RFID Input */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>RFID Tag</Text>
           <TextInput
-            style={[styles.input, styles.rfidInput]}
+            style={[
+              styles.input, 
+              styles.rfidInput,
+              validationErrors.some(e => e.includes('RFID')) && styles.inputError
+            ]}
             placeholder="Scan or enter RFID tag"
             value={rfidTag}
-            onChangeText={setRfidTag}
+            onChangeText={(text) => {
+              setRfidTag(text);
+              if (validationErrors.length > 0) {
+                setValidationErrors([]); // Clear errors when user starts typing
+              }
+            }}
             autoCapitalize="characters"
             autoFocus
           />
