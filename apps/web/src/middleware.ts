@@ -17,16 +17,13 @@ export async function middleware(request: NextRequest) {
           return request.cookies.get(name)?.value
         },
         set(name: string, value: string, options: CookieOptions) {
+          // Set cookie on request for current request
           request.cookies.set({
             name,
             value,
             ...options,
           })
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
+          // Set cookie on response for browser
           response.cookies.set({
             name,
             value,
@@ -34,16 +31,13 @@ export async function middleware(request: NextRequest) {
           })
         },
         remove(name: string, options: CookieOptions) {
+          // Remove cookie from request
           request.cookies.set({
             name,
             value: '',
             ...options,
           })
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          })
+          // Remove cookie from response
           response.cookies.set({
             name,
             value: '',
@@ -54,32 +48,47 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-  // If user is not signed in and the current path is not /login, redirect the user to /login
-  if (!user && request.nextUrl.pathname !== '/login') {
+    const pathname = request.nextUrl.pathname
+    
+    // Allow access to login page for unauthenticated users
+    if (!user && pathname === '/login') {
+      return response
+    }
+
+    // Redirect unauthenticated users to login (except for login page)
+    if (!user && pathname !== '/login') {
+      return NextResponse.redirect(new URL('/login', request.url))
+    }
+
+    // Redirect authenticated users away from login page
+    if (user && pathname === '/login') {
+      return NextResponse.redirect(new URL('/orgs', request.url))
+    }
+
+    // Allow authenticated users to access protected routes
+    return response
+  } catch (error) {
+    // If there's an error with authentication, redirect to login
+    console.error('Middleware auth error:', error)
     return NextResponse.redirect(new URL('/login', request.url))
   }
-
-  // If user is signed in and the current path is /login, redirect the user to /orgs
-  if (user && request.nextUrl.pathname === '/login') {
-    return NextResponse.redirect(new URL('/orgs', request.url))
-  }
-
-  return response
 }
 
 export const config = {
   matcher: [
     /*
      * Match all request paths except for the ones starting with:
+     * - api (API routes)
      * - _next/static (static files)
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
-     * Feel free to modify this pattern to include more paths.
+     * - public folder files
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
   ],
 }
