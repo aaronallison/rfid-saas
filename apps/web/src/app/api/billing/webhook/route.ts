@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
+import { mapStripeStatusToBillingStatus } from '@/lib/billing'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2024-06-20',
@@ -81,13 +82,15 @@ async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) 
     // Get subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId)
 
+    const billingStatus = mapStripeStatusToBillingStatus(subscription.status)
+
     await supabase
       .from('billing_org')
       .upsert({
         org_id: org_id,
         stripe_customer_id: customerId,
         stripe_subscription_id: subscriptionId,
-        billing_status: subscription.status as any,
+        billing_status: billingStatus,
         updated_at: new Date().toISOString()
       })
 
@@ -113,20 +116,13 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
       return
     }
 
-    let billingStatus: string = subscription.status
-    
-    // Map Stripe subscription statuses to our billing statuses
-    if (subscription.status === 'incomplete' || subscription.status === 'incomplete_expired') {
-      billingStatus = 'canceled'
-    } else if (subscription.status === 'unpaid') {
-      billingStatus = 'past_due'
-    }
+    const billingStatus = mapStripeStatusToBillingStatus(subscription.status)
 
     await supabase
       .from('billing_org')
       .update({
         stripe_subscription_id: subscription.id,
-        billing_status: billingStatus as any,
+        billing_status: billingStatus,
         updated_at: new Date().toISOString()
       })
       .eq('org_id', billingInfo.org_id)
