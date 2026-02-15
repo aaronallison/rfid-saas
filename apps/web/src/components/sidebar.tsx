@@ -7,6 +7,7 @@ import {
   Users, 
   Package, 
   CreditCard, 
+  RefreshCw,
   LogOut,
   Menu,
   X,
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Organizations', href: '/orgs', icon: Building2 },
   { name: 'Team', href: '/team', icon: Users },
   { name: 'Batches', href: '/batches', icon: Package },
+  { name: 'Sync', href: '/sync', icon: RefreshCw },
   { name: 'Billing', href: '/billing', icon: CreditCard },
 ]
 
