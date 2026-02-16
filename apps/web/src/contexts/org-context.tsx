@@ -1,23 +1,14 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
-import { User } from '@supabase/supabase-js'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { createBrowserSupabaseClient } from '@/lib/supabase'
-import type { Database } from '@/lib/supabase'
-
-type Organization = Database['public']['Tables']['organizations']['Row']
-type OrganizationMember = Database['public']['Tables']['organization_members']['Row']
-
-interface OrganizationContextType {
-  user: User | null
-  currentOrg: Organization | null
-  organizations: Organization[]
-  userRole: string | null
-  isLoading: boolean
-  switchOrganization: (orgId: string) => void
-  refreshOrganizations: () => Promise<void>
-  setUser: (user: User | null) => void
-}
+import type { 
+  Organization, 
+  OrganizationContextType, 
+  OrganizationProviderProps,
+  MembershipWithOrganization 
+} from './types'
+import type { User } from '@supabase/supabase-js'
 
 const OrganizationContext = createContext<OrganizationContextType | undefined>(undefined)
 
@@ -27,11 +18,6 @@ export function useOrganization() {
     throw new Error('useOrganization must be used within an OrganizationProvider')
   }
   return context
-}
-
-interface OrganizationProviderProps {
-  children: ReactNode
-  initialUser?: User | null
 }
 
 export function OrganizationProvider({ children, initialUser }: OrganizationProviderProps) {
@@ -59,7 +45,7 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
         return
       }
 
-      const orgs = memberships?.map((m: any) => m.organizations).filter(Boolean) || []
+      const orgs = memberships?.map((m: MembershipWithOrganization) => m.organizations).filter(Boolean) || []
       setOrganizations(orgs)
 
       // Set current org from localStorage or first org
@@ -68,7 +54,7 @@ export function OrganizationProvider({ children, initialUser }: OrganizationProv
       
       if (targetOrg) {
         setCurrentOrg(targetOrg)
-        const membership = memberships?.find((m: any) => m.organizations?.id === targetOrg.id)
+        const membership = memberships?.find((m: MembershipWithOrganization) => m.organizations?.id === targetOrg.id)
         setUserRole(membership?.role || null)
         localStorage.setItem('currentOrgId', targetOrg.id)
       }
