@@ -1,18 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
-import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20',
-})
+import { constructWebhookEvent, retrieveSubscription, mapSubscriptionStatus, type StripeEvent } from '@/lib/stripe'
+import { updateBillingInfo } from '@/lib/billing'
 
 const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
-
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,16 +15,17 @@ export async function POST(request: NextRequest) {
     const signature = request.headers.get('stripe-signature')
 
     if (!signature) {
+      console.error('Missing Stripe signature in webhook request')
       return NextResponse.json(
         { error: 'Missing signature' },
         { status: 400 }
       )
     }
 
-    let event: Stripe.Event
+    let event: StripeEvent
 
     try {
-      event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
+      event = constructWebhookEvent(body, signature)
     } catch (err) {
       console.error('Webhook signature verification failed:', err)
       return NextResponse.json(
@@ -38,28 +34,54 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log(`Processing webhook event: ${event.type} (${event.id})`)
+
     // Handle the event
-    switch (event.type) {
-      case 'checkout.session.completed':
-        await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session)
-        break
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed':
+          await handleCheckoutSessionCompleted(event.data.object as any)
+          break
 
-      case 'customer.subscription.updated':
-        await handleSubscriptionUpdated(event.data.object as Stripe.Subscription)
-        break
+        case 'customer.subscription.created':
+          await handleSubscriptionCreated(event.data.object as any)
+          break
 
-      case 'customer.subscription.deleted':
-        await handleSubscriptionDeleted(event.data.object as Stripe.Subscription)
-        break
+        case 'customer.subscription.updated':
+          await handleSubscriptionUpdated(event.data.object as any)
+          break
 
-      default:
-        console.log(`Unhandled event type: ${event.type}`)
+        case 'customer.subscription.deleted':
+          await handleSubscriptionDeleted(event.data.object as any)
+          break
+
+        case 'invoice.payment_succeeded':
+          await handlePaymentSucceeded(event.data.object as any)
+          break
+
+        case 'invoice.payment_failed':
+          await handlePaymentFailed(event.data.object as any)
+          break
+
+        default:
+          console.log(`Unhandled event type: ${event.type}`)
+      }
+    } catch (handlerError) {
+      console.error(`Error handling webhook event ${event.type}:`, handlerError)
+      return NextResponse.json(
+        { error: 'Event handler failed' },
+        { status: 500 }
+      )
     }
 
-    return NextResponse.json({ received: true })
+    return NextResponse.json({ 
+      received: true,
+      event_id: event.id,
+      event_type: event.type
+    })
 
   } catch (error) {
-    console.error('Webhook error:', error)
+    console.error('Webhook processing error:', error)
     return NextResponse.json(
       { error: 'Webhook handler failed' },
       { status: 500 }
@@ -67,102 +89,153 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
+async function handleCheckoutSessionCompleted(session: any) {
   try {
     const org_id = session.metadata?.org_id
     if (!org_id) {
-      console.error('No org_id in checkout session metadata')
+      console.error('No org_id in checkout session metadata:', session.id)
       return
     }
 
     const subscriptionId = session.subscription as string
     const customerId = session.customer as string
 
+    if (!subscriptionId || !customerId) {
+      console.error('Missing subscription or customer ID in checkout session:', session.id)
+      return
+    }
+
     // Get subscription details
-    const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+    const subscription = await retrieveSubscription(subscriptionId)
+    const billingStatus = mapSubscriptionStatus(subscription.status)
 
-    await supabase
-      .from('billing_org')
-      .upsert({
-        org_id: org_id,
-        stripe_customer_id: customerId,
-        stripe_subscription_id: subscriptionId,
-        billing_status: subscription.status as any,
-        updated_at: new Date().toISOString()
-      })
+    await updateBillingInfo(supabase, org_id, {
+      stripe_customer_id: customerId,
+      stripe_subscription_id: subscriptionId,
+      billing_status: billingStatus,
+    })
 
-    console.log(`Checkout completed for org ${org_id}, subscription ${subscriptionId}`)
+    console.log(`Checkout completed for org ${org_id}, subscription ${subscriptionId}, status: ${billingStatus}`)
   } catch (error) {
     console.error('Error handling checkout session completed:', error)
+    throw error
   }
 }
 
-async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
+async function handleSubscriptionCreated(subscription: any) {
   try {
-    const customerId = subscription.customer as string
+    await handleSubscriptionChange(subscription, 'created')
+  } catch (error) {
+    console.error('Error handling subscription created:', error)
+    throw error
+  }
+}
 
-    // Find the organization by customer ID
-    const { data: billingInfo, error } = await supabase
-      .from('billing_org')
-      .select('org_id')
-      .eq('stripe_customer_id', customerId)
-      .single()
-
-    if (error || !billingInfo) {
-      console.error('No billing info found for customer:', customerId)
-      return
-    }
-
-    let billingStatus: string = subscription.status
-    
-    // Map Stripe subscription statuses to our billing statuses
-    if (subscription.status === 'incomplete' || subscription.status === 'incomplete_expired') {
-      billingStatus = 'canceled'
-    } else if (subscription.status === 'unpaid') {
-      billingStatus = 'past_due'
-    }
-
-    await supabase
-      .from('billing_org')
-      .update({
-        stripe_subscription_id: subscription.id,
-        billing_status: billingStatus as any,
-        updated_at: new Date().toISOString()
-      })
-      .eq('org_id', billingInfo.org_id)
-
-    console.log(`Subscription updated for org ${billingInfo.org_id}, status: ${billingStatus}`)
+async function handleSubscriptionUpdated(subscription: any) {
+  try {
+    await handleSubscriptionChange(subscription, 'updated')
   } catch (error) {
     console.error('Error handling subscription updated:', error)
+    throw error
   }
 }
 
-async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
+async function handleSubscriptionDeleted(subscription: any) {
   try {
     const customerId = subscription.customer as string
-
-    // Find the organization by customer ID
-    const { data: billingInfo, error } = await supabase
-      .from('billing_org')
-      .select('org_id')
-      .eq('stripe_customer_id', customerId)
-      .single()
-
-    if (error || !billingInfo) {
+    const billingInfo = await findBillingInfoByCustomerId(customerId)
+    
+    if (!billingInfo) {
       console.error('No billing info found for customer:', customerId)
       return
     }
 
-    await supabase
-      .from('billing_org')
-      .update({
-        billing_status: 'canceled',
-        updated_at: new Date().toISOString()
-      })
-      .eq('org_id', billingInfo.org_id)
+    await updateBillingInfo(supabase, billingInfo.org_id, {
+      billing_status: 'canceled',
+    })
 
     console.log(`Subscription canceled for org ${billingInfo.org_id}`)
   } catch (error) {
     console.error('Error handling subscription deleted:', error)
+    throw error
   }
+}
+
+async function handlePaymentSucceeded(invoice: any) {
+  try {
+    const customerId = invoice.customer as string
+    const billingInfo = await findBillingInfoByCustomerId(customerId)
+    
+    if (!billingInfo) {
+      console.error('No billing info found for customer:', customerId)
+      return
+    }
+
+    // If payment succeeded and status was past_due, update to active
+    if (billingInfo.billing_status === 'past_due') {
+      await updateBillingInfo(supabase, billingInfo.org_id, {
+        billing_status: 'active',
+      })
+      console.log(`Payment succeeded, updated org ${billingInfo.org_id} to active`)
+    }
+  } catch (error) {
+    console.error('Error handling payment succeeded:', error)
+    throw error
+  }
+}
+
+async function handlePaymentFailed(invoice: any) {
+  try {
+    const customerId = invoice.customer as string
+    const billingInfo = await findBillingInfoByCustomerId(customerId)
+    
+    if (!billingInfo) {
+      console.error('No billing info found for customer:', customerId)
+      return
+    }
+
+    // Mark as past due when payment fails
+    await updateBillingInfo(supabase, billingInfo.org_id, {
+      billing_status: 'past_due',
+    })
+
+    console.log(`Payment failed for org ${billingInfo.org_id}, marked as past_due`)
+  } catch (error) {
+    console.error('Error handling payment failed:', error)
+    throw error
+  }
+}
+
+async function handleSubscriptionChange(subscription: any, changeType: string) {
+  const customerId = subscription.customer as string
+  const billingInfo = await findBillingInfoByCustomerId(customerId)
+  
+  if (!billingInfo) {
+    console.error(`No billing info found for customer: ${customerId}`)
+    return
+  }
+
+  const billingStatus = mapSubscriptionStatus(subscription.status)
+
+  await updateBillingInfo(supabase, billingInfo.org_id, {
+    stripe_subscription_id: subscription.id,
+    billing_status: billingStatus,
+  })
+
+  console.log(`Subscription ${changeType} for org ${billingInfo.org_id}, status: ${billingStatus}`)
+}
+
+async function findBillingInfoByCustomerId(customerId: string) {
+  const { data: billingInfo, error } = await supabase
+    .from('billing_org')
+    .select('org_id, billing_status')
+    .eq('stripe_customer_id', customerId)
+    .single()
+
+  if (error) {
+    console.error('Error fetching billing info by customer ID:', error)
+    return null
+  }
+
+  return billingInfo
 }
