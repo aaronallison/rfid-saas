@@ -14,12 +14,18 @@
     },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.company.rfidfieldcapture",
+      "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app uses location to tag RFID captures with GPS coordinates for field data collection.",
-        "NSCameraUsageDescription": "This app may use the camera to scan RFID tags or QR codes for data capture."
+        "NSCameraUsageDescription": "This app may use the camera to scan RFID tags or QR codes for data capture.",
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to RFID readers for field data collection.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to RFID readers for field data collection."
       }
     },
     "android": {
+      "package": "com.company.rfidfieldcapture",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -29,6 +35,11 @@
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "CAMERA",
         "INTERNET",
         "ACCESS_NETWORK_STATE"
       ]
@@ -40,9 +51,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow RFID Field Capture to use your location to tag captures with GPS coordinates.",
-          "locationAlwaysPermission": "Allow RFID Field Capture to use your location to tag captures with GPS coordinates.",
-          "locationWhenInUsePermission": "Allow RFID Field Capture to use your location to tag captures with GPS coordinates."
+          "locationAlwaysAndWhenInUsePermission": "Allow RFID Field Capture to use your location to tag RFID captures with GPS coordinates for accurate field data collection.",
+          "locationWhenInUsePermission": "Allow RFID Field Capture to use your location to tag RFID captures with GPS coordinates for accurate field data collection.",
+          "isIosBackgroundLocationEnabled": false
         }
       ]
     ]
