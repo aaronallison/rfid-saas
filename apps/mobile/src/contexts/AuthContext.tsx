@@ -65,10 +65,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       // Fetch user organizations
       const { data: organizations, error } = await supabase
-        .from('user_organizations')
+        .from('org_members')
         .select(`
-          organization:organizations (
-            id,
+          organization:organizations!org_members_org_id_fkey (
+            org_id,
             name,
             created_at
           )
@@ -77,7 +77,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (error) throw error;
 
-      const userOrgs = organizations?.map(item => item.organization) || [];
+      const userOrgs = organizations?.map(item => ({
+        id: item.organization.org_id,
+        name: item.organization.name,
+        created_at: item.organization.created_at,
+      })).filter(org => org != null) || [];
       
       const userData: User = {
         id: userId,
