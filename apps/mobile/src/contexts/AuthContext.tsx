@@ -79,9 +79,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       const userOrgs = organizations?.map(item => item.organization) || [];
       
+      // Get current session to access user email
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
       const userData: User = {
         id: userId,
-        email: session?.user?.email || '',
+        email: currentSession?.user?.email || '',
         organizations: userOrgs,
       };
 

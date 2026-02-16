@@ -33,9 +33,39 @@ export type MainTabParamList = {
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
-// Simple RFID screen with built-in tabs
+// RFID tab navigator for reader settings and tag stream
+const RfidTab = createBottomTabNavigator();
+
+function RfidTabs() {
+  return (
+    <RfidTab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
+      }}
+    >
+      <RfidTab.Screen
+        name="Settings"
+        component={ReaderSettingsScreen}
+        options={{
+          tabBarLabel: 'Settings',
+        }}
+      />
+      <RfidTab.Screen
+        name="TagStream"
+        component={TagStreamScreen}
+        options={{
+          tabBarLabel: 'Tag Stream',
+        }}
+      />
+    </RfidTab.Navigator>
+  );
+}
+
+// Simple wrapper for the RFID screen
 function RfidScreen() {
-  return <ReaderSettingsScreen />;
+  return <RfidTabs />;
 }
 
 function MainTabs() {
@@ -57,7 +87,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="RFID"
-        component={RfidTabs}
+        component={RfidScreen}
         options={{
           tabBarLabel: 'RFID',
           headerShown: true,
