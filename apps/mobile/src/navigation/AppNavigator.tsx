@@ -30,12 +30,48 @@ export type MainTabParamList = {
   Sync: undefined;
 };
 
+export type RfidTabParamList = {
+  Settings: undefined;
+  Stream: undefined;
+};
+
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const RfidTab = createBottomTabNavigator<RfidTabParamList>();
 
-// Simple RFID screen with built-in tabs
-function RfidScreen() {
-  return <ReaderSettingsScreen />;
+// RFID screen with nested tabs for Settings and Stream
+function RfidTabs() {
+  return (
+    <RfidTab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#007AFF',
+        tabBarInactiveTintColor: '#8E8E93',
+        tabBarStyle: { 
+          backgroundColor: '#fff',
+          borderTopWidth: 1,
+          borderTopColor: '#E5E5E7',
+        },
+      }}
+    >
+      <RfidTab.Screen
+        name="Settings"
+        component={ReaderSettingsScreen}
+        options={{ 
+          tabBarLabel: 'Reader Settings',
+          // You can add tab icons here with tabBarIcon
+        }}
+      />
+      <RfidTab.Screen
+        name="Stream"
+        component={TagStreamScreen}
+        options={{ 
+          tabBarLabel: 'Tag Stream',
+          // You can add tab icons here with tabBarIcon
+        }}
+      />
+    </RfidTab.Navigator>
+  );
 }
 
 function MainTabs() {
@@ -45,6 +81,17 @@ function MainTabs() {
         headerShown: false,
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#8E8E93',
+        tabBarStyle: {
+          backgroundColor: '#fff',
+          borderTopWidth: 1,
+          borderTopColor: '#E5E5E7',
+          paddingBottom: 5,
+          paddingTop: 5,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '600',
+        },
       }}
     >
       <Tab.Screen
@@ -52,7 +99,7 @@ function MainTabs() {
         component={BatchesListScreen}
         options={{
           tabBarLabel: 'Batches',
-          // You can add tab icons here with tabBarIcon
+          // TODO: Add tab icon - tabBarIcon: ({ color, size }) => <Icon name="list" size={size} color={color} />
         }}
       />
       <Tab.Screen
@@ -69,7 +116,7 @@ function MainTabs() {
             color: '#fff',
             fontWeight: 'bold',
           },
-          // You can add tab icons here with tabBarIcon
+          // TODO: Add tab icon - tabBarIcon: ({ color, size }) => <Icon name="radio" size={size} color={color} />
         }}
       />
       <Tab.Screen
@@ -77,7 +124,7 @@ function MainTabs() {
         component={SyncScreen}
         options={{
           tabBarLabel: 'Sync',
-          // You can add tab icons here with tabBarIcon
+          // TODO: Add tab icon - tabBarIcon: ({ color, size }) => <Icon name="sync" size={size} color={color} />
         }}
       />
     </Tab.Navigator>
@@ -87,8 +134,10 @@ function MainTabs() {
 export default function AppNavigator() {
   const { user, selectedOrganization, loading } = useAuth();
 
+  // Show loading screen while checking authentication state
   if (loading) {
-    return null; // Or a loading screen
+    // TODO: Replace with a proper loading screen component
+    return null;
   }
 
   return (
