@@ -57,7 +57,7 @@ function MainTabs() {
       />
       <Tab.Screen
         name="RFID"
-        component={RfidTabs}
+        component={RfidScreen}
         options={{
           tabBarLabel: 'RFID',
           headerShown: true,
