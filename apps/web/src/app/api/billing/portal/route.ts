@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 import { Database } from '@/lib/supabase'
+import { validateUserAccess, isValidUUID } from '@/lib/auth'
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2024-06-20',
@@ -23,37 +24,21 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get the user from the session
-    const authHeader = request.headers.get('authorization')
-    if (!authHeader) {
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (!uuidRegex.test(org_id)) {
       return NextResponse.json(
-        { error: 'No authorization header' },
-        { status: 401 }
+        { error: 'Invalid organization ID format' },
+        { status: 400 }
       )
     }
 
-    const token = authHeader.replace('Bearer ', '')
-    const { data: { user }, error: userError } = await supabase.auth.getUser(token)
-
-    if (userError || !user) {
+    // Validate user access
+    const authResult = await validateUserAccess(request, org_id)
+    if ('error' in authResult) {
       return NextResponse.json(
-        { error: 'Invalid or expired token' },
-        { status: 401 }
-      )
-    }
-
-    // Verify user has access to the organization
-    const { data: membership, error: membershipError } = await supabase
-      .from('organization_members')
-      .select('role')
-      .eq('organization_id', org_id)
-      .eq('user_id', user.id)
-      .single()
-
-    if (membershipError || !membership || (membership.role !== 'owner' && membership.role !== 'admin')) {
-      return NextResponse.json(
-        { error: 'Insufficient permissions' },
-        { status: 403 }
+        { error: authResult.error },
+        { status: authResult.status }
       )
     }
 
@@ -64,25 +49,58 @@ export async function POST(request: NextRequest) {
       .eq('org_id', org_id)
       .single()
 
-    if (billingError || !billingInfo?.stripe_customer_id) {
+    if (billingError) {
+      console.error('Error fetching billing info:', billingError)
       return NextResponse.json(
         { error: 'No billing information found' },
         { status: 404 }
       )
     }
 
-    // Create Stripe Customer Portal Session
-    const session = await stripe.billingPortal.sessions.create({
-      customer: billingInfo.stripe_customer_id,
-      return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing`,
-    })
+    if (!billingInfo?.stripe_customer_id) {
+      return NextResponse.json(
+        { error: 'No billing information found' },
+        { status: 404 }
+      )
+    }
 
-    return NextResponse.json({ url: session.url })
+    // Validate required environment variables
+    if (!process.env.NEXT_PUBLIC_SITE_URL) {
+      console.error('Missing NEXT_PUBLIC_SITE_URL environment variable')
+      return NextResponse.json(
+        { error: 'Service configuration error' },
+        { status: 500 }
+      )
+    }
+
+    // Create Stripe Customer Portal Session
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: billingInfo.stripe_customer_id,
+        return_url: `${process.env.NEXT_PUBLIC_SITE_URL}/billing`,
+      })
+
+      if (!session.url) {
+        console.error('Stripe portal session created but no URL returned')
+        return NextResponse.json(
+          { error: 'Failed to create portal session' },
+          { status: 500 }
+        )
+      }
+
+      return NextResponse.json({ url: session.url })
+    } catch (stripeError) {
+      console.error('Error creating Stripe portal session:', stripeError)
+      return NextResponse.json(
+        { error: 'Failed to create portal session' },
+        { status: 500 }
+      )
+    }
 
   } catch (error) {
-    console.error('Error creating portal session:', error)
+    console.error('Unexpected error in portal route:', error)
     return NextResponse.json(
-      { error: 'Failed to create portal session' },
+      { error: 'Internal server error' },
       { status: 500 }
     )
   }

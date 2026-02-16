@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { useOrganization } from '@/contexts/org-context'
 import { createBrowserSupabaseClient } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
+import { ThemeToggle } from '@/components/theme-toggle'
 
 const navigation = [
   { name: 'Organizations', href: '/orgs', icon: Building2 },
