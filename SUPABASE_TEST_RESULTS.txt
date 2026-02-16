@@ -1,0 +1,83 @@
+SUPABASE DATABASE TEST RESULTS
+Generated on: $(date)
+
+==============================================
+QUERY 1: All public tables
+==============================================
+SQL: SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
+
+Raw JSON Output:
+{
+  "command": "SELECT",
+  "rowCount": 6,
+  "rows": [
+    {
+      "table_name": "batch_schema"
+    },
+    {
+      "table_name": "batches"
+    },
+    {
+      "table_name": "billing_org"
+    },
+    {
+      "table_name": "captures_universal"
+    },
+    {
+      "table_name": "org_members"
+    },
+    {
+      "table_name": "organizations"
+    }
+  ]
+}
+
+==============================================
+QUERY 2: RLS Policy Count
+==============================================
+SQL: SELECT count(*) as policy_count FROM pg_policies WHERE schemaname = 'public';
+
+Raw JSON Output:
+{
+  "command": "SELECT",
+  "rowCount": 1,
+  "rows": [
+    {
+      "policy_count": "22"
+    }
+  ]
+}
+
+==============================================
+QUERY 3: Public routines (functions/procedures)
+==============================================
+SQL: SELECT routine_name FROM information_schema.routines WHERE routine_schema = 'public';
+
+Raw JSON Output:
+{
+  "command": "SELECT",
+  "rowCount": 1,
+  "rows": [
+    {
+      "routine_name": "is_org_member"
+    }
+  ]
+}
+
+==============================================
+SUMMARY
+==============================================
+- Total public tables: 6
+- Total RLS policies: 22
+- Total public routines: 1
+
+Tables found:
+- batch_schema
+- batches
+- billing_org
+- captures_universal
+- org_members
+- organizations
+
+Routines found:
+- is_org_member
