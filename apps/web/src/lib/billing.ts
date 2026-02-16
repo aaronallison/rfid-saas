@@ -1,5 +1,6 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 import { Database } from './supabase'
+import { validateOrgId } from './auth'
 
 export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'canceled'
 
@@ -21,6 +22,11 @@ export async function checkBillingStatus(
   supabase: SupabaseClient<Database>,
   org_id: string
 ): Promise<boolean> {
+  if (!validateOrgId(org_id)) {
+    console.error('Invalid organization ID provided to checkBillingStatus')
+    return false
+  }
+
   try {
     const { data, error } = await supabase
       .from('billing_org')
@@ -55,6 +61,11 @@ export async function getBillingInfo(
   supabase: SupabaseClient<Database>,
   org_id: string
 ): Promise<BillingInfo | null> {
+  if (!validateOrgId(org_id)) {
+    console.error('Invalid organization ID provided to getBillingInfo')
+    return null
+  }
+
   try {
     const { data, error } = await supabase
       .from('billing_org')
@@ -88,6 +99,10 @@ export async function updateBillingInfo(
   org_id: string,
   billingData: Partial<Omit<BillingInfo, 'org_id'>>
 ): Promise<void> {
+  if (!validateOrgId(org_id)) {
+    throw new Error('Invalid organization ID provided to updateBillingInfo')
+  }
+
   try {
     const { error } = await supabase
       .from('billing_org')
@@ -99,7 +114,7 @@ export async function updateBillingInfo(
 
     if (error) {
       console.error('Error updating billing info:', error)
-      throw error
+      throw new Error(`Failed to update billing info: ${error.message}`)
     }
   } catch (error) {
     console.error('Error in updateBillingInfo:', error)
@@ -122,15 +137,29 @@ export async function checkFeatureAccess(
   canExport: boolean
   canAddTeamMembers: boolean
   maxTeamSize: number
+  billingStatus: BillingStatus | null
 }> {
-  const hasActiveBilling = await checkBillingStatus(supabase, org_id)
+  if (!validateOrgId(org_id)) {
+    console.error('Invalid organization ID provided to checkFeatureAccess')
+    return {
+      canSync: false,
+      canExport: false,
+      canAddTeamMembers: false,
+      maxTeamSize: 0,
+      billingStatus: null
+    }
+  }
+
+  const billingInfo = await getBillingInfo(supabase, org_id)
+  const hasActiveBilling = billingInfo?.billing_status === 'active' || billingInfo?.billing_status === 'trialing'
 
   if (hasActiveBilling) {
     return {
       canSync: true,
       canExport: true,
       canAddTeamMembers: true,
-      maxTeamSize: 50 // Premium limit
+      maxTeamSize: 50, // Premium limit
+      billingStatus: billingInfo.billing_status
     }
   }
 
@@ -139,6 +168,41 @@ export async function checkFeatureAccess(
     canSync: false,
     canExport: false,
     canAddTeamMembers: true,
-    maxTeamSize: 3 // Free tier limit
+    maxTeamSize: 3, // Free tier limit
+    billingStatus: billingInfo?.billing_status || null
+  }
+}
+
+/**
+ * Check current team size for an organization
+ * @param supabase Supabase client
+ * @param org_id Organization ID
+ * @returns current team member count
+ */
+export async function getCurrentTeamSize(
+  supabase: SupabaseClient<Database>,
+  org_id: string
+): Promise<number> {
+  if (!validateOrgId(org_id)) {
+    console.error('Invalid organization ID provided to getCurrentTeamSize')
+    return 0
+  }
+
+  try {
+    const { count, error } = await supabase
+      .from('organization_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('organization_id', org_id)
+      .not('user_id', 'is', null) // Only count actual members, not invites
+
+    if (error) {
+      console.error('Error getting team size:', error)
+      return 0
+    }
+
+    return count || 0
+  } catch (error) {
+    console.error('Error in getCurrentTeamSize:', error)
+    return 0
   }
 }

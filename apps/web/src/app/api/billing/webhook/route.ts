@@ -14,16 +14,22 @@ const supabase = createClient<Database>(
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!
 
+type BillingStatus = 'trialing' | 'active' | 'past_due' | 'canceled'
+
 export async function POST(request: NextRequest) {
   try {
+    // Validate required environment variables
+    if (!process.env.STRIPE_SECRET_KEY || !webhookSecret) {
+      console.error('Missing required environment variables for webhook')
+      return NextResponse.json({ error: 'Webhook configuration error' }, { status: 500 })
+    }
+
     const body = await request.text()
     const signature = request.headers.get('stripe-signature')
 
     if (!signature) {
-      return NextResponse.json(
-        { error: 'Missing signature' },
-        { status: 400 }
-      )
+      console.error('Webhook received without signature')
+      return NextResponse.json({ error: 'Missing signature' }, { status: 400 })
     }
 
     let event: Stripe.Event
@@ -32,16 +38,19 @@ export async function POST(request: NextRequest) {
       event = stripe.webhooks.constructEvent(body, signature, webhookSecret)
     } catch (err) {
       console.error('Webhook signature verification failed:', err)
-      return NextResponse.json(
-        { error: 'Invalid signature' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
     }
+
+    console.log(`Processing webhook event: ${event.type}`)
 
     // Handle the event
     switch (event.type) {
       case 'checkout.session.completed':
         await handleCheckoutSessionCompleted(event.data.object as Stripe.Checkout.Session)
+        break
+
+      case 'customer.subscription.created':
+        await handleSubscriptionCreated(event.data.object as Stripe.Subscription)
         break
 
       case 'customer.subscription.updated':
@@ -52,6 +61,14 @@ export async function POST(request: NextRequest) {
         await handleSubscriptionDeleted(event.data.object as Stripe.Subscription)
         break
 
+      case 'invoice.payment_failed':
+        await handlePaymentFailed(event.data.object as Stripe.Invoice)
+        break
+
+      case 'invoice.payment_succeeded':
+        await handlePaymentSucceeded(event.data.object as Stripe.Invoice)
+        break
+
       default:
         console.log(`Unhandled event type: ${event.type}`)
     }
@@ -60,46 +77,56 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Webhook error:', error)
-    return NextResponse.json(
-      { error: 'Webhook handler failed' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Webhook handler failed' }, { status: 500 })
   }
 }
 
 async function handleCheckoutSessionCompleted(session: Stripe.Checkout.Session) {
   try {
     const org_id = session.metadata?.org_id
-    if (!org_id) {
-      console.error('No org_id in checkout session metadata')
+    if (!org_id || !isValidUUID(org_id)) {
+      console.error('Invalid or missing org_id in checkout session metadata:', org_id)
       return
     }
 
     const subscriptionId = session.subscription as string
     const customerId = session.customer as string
 
+    if (!subscriptionId || !customerId) {
+      console.error('Missing subscription or customer ID in checkout session')
+      return
+    }
+
     // Get subscription details
     const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+    const billingStatus = mapStripeToBillingStatus(subscription.status)
 
-    await supabase
+    const { error } = await supabase
       .from('billing_org')
       .upsert({
         org_id: org_id,
         stripe_customer_id: customerId,
         stripe_subscription_id: subscriptionId,
-        billing_status: subscription.status as any,
+        billing_status: billingStatus,
         updated_at: new Date().toISOString()
       })
 
-    console.log(`Checkout completed for org ${org_id}, subscription ${subscriptionId}`)
+    if (error) {
+      console.error('Error updating billing info after checkout:', error)
+      throw error
+    }
+
+    console.log(`Checkout completed for org ${org_id}, subscription ${subscriptionId}, status: ${billingStatus}`)
   } catch (error) {
     console.error('Error handling checkout session completed:', error)
+    throw error
   }
 }
 
-async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
+async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
   try {
     const customerId = subscription.customer as string
+    const billingStatus = mapStripeToBillingStatus(subscription.status)
 
     // Find the organization by customer ID
     const { data: billingInfo, error } = await supabase
@@ -108,32 +135,67 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
       .eq('stripe_customer_id', customerId)
       .single()
 
-    if (error || !billingInfo) {
-      console.error('No billing info found for customer:', customerId)
+    if (error) {
+      console.error('No billing info found for customer during subscription creation:', customerId, error)
       return
     }
 
-    let billingStatus: string = subscription.status
-    
-    // Map Stripe subscription statuses to our billing statuses
-    if (subscription.status === 'incomplete' || subscription.status === 'incomplete_expired') {
-      billingStatus = 'canceled'
-    } else if (subscription.status === 'unpaid') {
-      billingStatus = 'past_due'
-    }
-
-    await supabase
+    const { error: updateError } = await supabase
       .from('billing_org')
       .update({
         stripe_subscription_id: subscription.id,
-        billing_status: billingStatus as any,
+        billing_status: billingStatus,
         updated_at: new Date().toISOString()
       })
       .eq('org_id', billingInfo.org_id)
 
+    if (updateError) {
+      console.error('Error updating billing info after subscription creation:', updateError)
+      throw updateError
+    }
+
+    console.log(`Subscription created for org ${billingInfo.org_id}, status: ${billingStatus}`)
+  } catch (error) {
+    console.error('Error handling subscription created:', error)
+    throw error
+  }
+}
+
+async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
+  try {
+    const customerId = subscription.customer as string
+    const billingStatus = mapStripeToBillingStatus(subscription.status)
+
+    // Find the organization by customer ID
+    const { data: billingInfo, error } = await supabase
+      .from('billing_org')
+      .select('org_id')
+      .eq('stripe_customer_id', customerId)
+      .single()
+
+    if (error) {
+      console.error('No billing info found for customer during subscription update:', customerId, error)
+      return
+    }
+
+    const { error: updateError } = await supabase
+      .from('billing_org')
+      .update({
+        stripe_subscription_id: subscription.id,
+        billing_status: billingStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('org_id', billingInfo.org_id)
+
+    if (updateError) {
+      console.error('Error updating billing info after subscription update:', updateError)
+      throw updateError
+    }
+
     console.log(`Subscription updated for org ${billingInfo.org_id}, status: ${billingStatus}`)
   } catch (error) {
     console.error('Error handling subscription updated:', error)
+    throw error
   }
 }
 
@@ -148,12 +210,12 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       .eq('stripe_customer_id', customerId)
       .single()
 
-    if (error || !billingInfo) {
-      console.error('No billing info found for customer:', customerId)
+    if (error) {
+      console.error('No billing info found for customer during subscription deletion:', customerId, error)
       return
     }
 
-    await supabase
+    const { error: updateError } = await supabase
       .from('billing_org')
       .update({
         billing_status: 'canceled',
@@ -161,8 +223,134 @@ async function handleSubscriptionDeleted(subscription: Stripe.Subscription) {
       })
       .eq('org_id', billingInfo.org_id)
 
+    if (updateError) {
+      console.error('Error updating billing info after subscription deletion:', updateError)
+      throw updateError
+    }
+
     console.log(`Subscription canceled for org ${billingInfo.org_id}`)
   } catch (error) {
     console.error('Error handling subscription deleted:', error)
+    throw error
   }
+}
+
+async function handlePaymentFailed(invoice: Stripe.Invoice) {
+  try {
+    const customerId = invoice.customer as string
+    const subscriptionId = invoice.subscription as string
+
+    if (!subscriptionId) {
+      console.log('Invoice payment failed but no subscription ID found')
+      return
+    }
+
+    // Find the organization by customer ID
+    const { data: billingInfo, error } = await supabase
+      .from('billing_org')
+      .select('org_id')
+      .eq('stripe_customer_id', customerId)
+      .single()
+
+    if (error) {
+      console.error('No billing info found for customer during payment failure:', customerId, error)
+      return
+    }
+
+    // Update to past_due status
+    const { error: updateError } = await supabase
+      .from('billing_org')
+      .update({
+        billing_status: 'past_due',
+        updated_at: new Date().toISOString()
+      })
+      .eq('org_id', billingInfo.org_id)
+
+    if (updateError) {
+      console.error('Error updating billing info after payment failure:', updateError)
+      throw updateError
+    }
+
+    console.log(`Payment failed for org ${billingInfo.org_id}, marked as past_due`)
+  } catch (error) {
+    console.error('Error handling payment failed:', error)
+    throw error
+  }
+}
+
+async function handlePaymentSucceeded(invoice: Stripe.Invoice) {
+  try {
+    const customerId = invoice.customer as string
+    const subscriptionId = invoice.subscription as string
+
+    if (!subscriptionId) {
+      console.log('Invoice payment succeeded but no subscription ID found')
+      return
+    }
+
+    // Get current subscription status
+    const subscription = await stripe.subscriptions.retrieve(subscriptionId)
+    const billingStatus = mapStripeToBillingStatus(subscription.status)
+
+    // Find the organization by customer ID
+    const { data: billingInfo, error } = await supabase
+      .from('billing_org')
+      .select('org_id')
+      .eq('stripe_customer_id', customerId)
+      .single()
+
+    if (error) {
+      console.error('No billing info found for customer during payment success:', customerId, error)
+      return
+    }
+
+    // Update billing status based on subscription status
+    const { error: updateError } = await supabase
+      .from('billing_org')
+      .update({
+        billing_status: billingStatus,
+        updated_at: new Date().toISOString()
+      })
+      .eq('org_id', billingInfo.org_id)
+
+    if (updateError) {
+      console.error('Error updating billing info after payment success:', updateError)
+      throw updateError
+    }
+
+    console.log(`Payment succeeded for org ${billingInfo.org_id}, status: ${billingStatus}`)
+  } catch (error) {
+    console.error('Error handling payment succeeded:', error)
+    throw error
+  }
+}
+
+/**
+ * Map Stripe subscription status to our billing status
+ */
+function mapStripeToBillingStatus(stripeStatus: string): BillingStatus {
+  switch (stripeStatus) {
+    case 'trialing':
+      return 'trialing'
+    case 'active':
+      return 'active'
+    case 'past_due':
+    case 'unpaid':
+      return 'past_due'
+    case 'canceled':
+    case 'incomplete':
+    case 'incomplete_expired':
+      return 'canceled'
+    default:
+      console.warn(`Unknown Stripe status: ${stripeStatus}, defaulting to canceled`)
+      return 'canceled'
+  }
+}
+
+/**
+ * Validate UUID format
+ */
+function isValidUUID(uuid: string): boolean {
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  return uuidRegex.test(uuid)
 }
