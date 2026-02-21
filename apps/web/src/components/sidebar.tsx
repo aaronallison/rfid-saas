@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  Building2, 
-  Users, 
-  Package, 
-  CreditCard, 
+import {
+  Building2,
+  Users,
+  Package,
+  CreditCard,
+  Bug,
   LogOut,
   Menu,
   X,
@@ -22,6 +23,7 @@ const navigation = [
   { name: 'Organizations', href: '/orgs', icon: Building2 },
   { name: 'Team', href: '/team', icon: Users },
   { name: 'Batches', href: '/batches', icon: Package },
+  { name: 'Cases', href: '/cases', icon: Bug },
   { name: 'Billing', href: '/billing', icon: CreditCard },
 ]
 
