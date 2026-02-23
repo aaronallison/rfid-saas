@@ -1,106 +1,46 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import {
-  ArrowLeft, Bug, Zap, AlertCircle, CheckCircle2, XCircle, Clock,
-  GitPullRequest, FileCode, Shield, ChevronDown, ChevronUp, ExternalLink
+  ArrowLeft, Bug, Zap, Wrench, AlertCircle, CheckCircle2, XCircle, Clock,
+  GitPullRequest, FileCode, Shield, ChevronDown, ChevronUp
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useOrganization } from '@/contexts/org-context'
-import { createAgenticBrowserClient } from '@/lib/supabase-agentic'
+import { apiClient } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
-import type { AgenticDatabase } from '@/lib/supabase-agentic'
-
-type BugReport = AgenticDatabase['public']['Tables']['bug_reports']['Row']
-type Case = AgenticDatabase['public']['Tables']['cases']['Row']
-type CaseEvent = AgenticDatabase['public']['Tables']['case_events']['Row']
-type Plan = AgenticDatabase['public']['Tables']['plans']['Row']
-type Execution = AgenticDatabase['public']['Tables']['executions']['Row']
+import type { Case, CaseEvent, Plan, Approval } from '@/lib/api-client'
 
 export default function CaseDetailPage() {
   const params = useParams()
-  const router = useRouter()
-  const bugReportId = params.id as string
+  const caseId = params.id as string
 
-  const [bugReport, setBugReport] = useState<BugReport | null>(null)
   const [caseData, setCaseData] = useState<Case | null>(null)
   const [events, setEvents] = useState<CaseEvent[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
-  const [executions, setExecutions] = useState<Execution[]>([])
+  const [approvals, setApprovals] = useState<Approval[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
-  const [approvalFeedback, setApprovalFeedback] = useState('')
-  const [rejectReason, setRejectReason] = useState('')
   const [isApproving, setIsApproving] = useState(false)
-  const [isRejecting, setIsRejecting] = useState(false)
   const [showPlanDetails, setShowPlanDetails] = useState(false)
   const [showTimeline, setShowTimeline] = useState(true)
 
   const { currentOrg } = useOrganization()
-  const agentic = createAgenticBrowserClient()
 
   const fetchCaseData = async () => {
-    if (!currentOrg || !bugReportId) return
+    if (!currentOrg || !caseId) return
 
     setIsLoading(true)
     try {
-      // Fetch bug report
-      const { data: bug, error: bugError } = await agentic
-        .from('bug_reports')
-        .select('*')
-        .eq('id', bugReportId)
-        .eq('org_id', currentOrg.id)
-        .single()
-
-      if (bugError || !bug) {
-        setError('Bug report not found')
-        return
-      }
-      setBugReport(bug)
-
-      // Fetch case
-      const { data: cases } = await agentic
-        .from('cases')
-        .select('*')
-        .eq('bug_report_id', bugReportId)
-        .eq('org_id', currentOrg.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-
-      const currentCase = cases?.[0] || null
-      setCaseData(currentCase)
-
-      if (currentCase) {
-        // Fetch timeline events
-        const { data: eventData } = await agentic
-          .from('case_events')
-          .select('*')
-          .eq('case_id', currentCase.id)
-          .order('created_at', { ascending: true })
-
-        setEvents(eventData || [])
-
-        // Fetch plans
-        const { data: planData } = await agentic
-          .from('plans')
-          .select('*')
-          .eq('case_id', currentCase.id)
-          .order('version', { ascending: false })
-
-        setPlans(planData || [])
-
-        // Fetch executions
-        const { data: execData } = await agentic
-          .from('executions')
-          .select('*')
-          .eq('case_id', currentCase.id)
-          .order('created_at', { ascending: false })
-
-        setExecutions(execData || [])
-      }
+      const response = await apiClient.getTask(currentOrg.id, caseId)
+      const detail = response.data
+      setCaseData(detail)
+      setEvents(detail.events || [])
+      setPlans(detail.plans || [])
+      setApprovals(detail.approvals || [])
     } catch {
       setError('Failed to load case data')
     } finally {
@@ -110,69 +50,26 @@ export default function CaseDetailPage() {
 
   useEffect(() => {
     fetchCaseData()
-  }, [currentOrg, bugReportId])
+  }, [currentOrg, caseId])
 
   // Auto-refresh every 15 seconds for active cases
   useEffect(() => {
-    if (caseData && ['active', 'awaiting_approval'].includes(caseData.status)) {
+    if (caseData && ['open', 'in_progress'].includes(caseData.status)) {
       const interval = setInterval(fetchCaseData, 15000)
       return () => clearInterval(interval)
     }
   }, [caseData?.status])
 
   const handleApprove = async () => {
-    if (!caseData) return
+    if (!caseData || !currentOrg) return
     setIsApproving(true)
     try {
-      await agentic
-        .from('cases')
-        .update({ status: 'active', stage: 'execute' })
-        .eq('id', caseData.id)
-
-      await agentic
-        .from('case_events')
-        .insert({
-          case_id: caseData.id,
-          stage: 'approval_gate',
-          actor: 'human',
-          event_type: 'human_approved',
-          payload: { feedback: approvalFeedback }
-        })
-
-      setApprovalFeedback('')
+      await apiClient.approveTask(currentOrg.id, caseData.case_id)
       await fetchCaseData()
     } catch {
       setError('Failed to approve')
     } finally {
       setIsApproving(false)
-    }
-  }
-
-  const handleReject = async () => {
-    if (!caseData || !rejectReason) return
-    setIsRejecting(true)
-    try {
-      await agentic
-        .from('cases')
-        .update({ status: 'active', stage: 'plan' })
-        .eq('id', caseData.id)
-
-      await agentic
-        .from('case_events')
-        .insert({
-          case_id: caseData.id,
-          stage: 'approval_gate',
-          actor: 'human',
-          event_type: 'human_rejected',
-          payload: { reason: rejectReason }
-        })
-
-      setRejectReason('')
-      await fetchCaseData()
-    } catch {
-      setError('Failed to reject')
-    } finally {
-      setIsRejecting(false)
     }
   }
 
@@ -185,16 +82,13 @@ export default function CaseDetailPage() {
       case 'plan_review':
       case 'policy_review':
         return 'bg-yellow-100 text-yellow-800'
-      case 'approval_gate':
-        return 'bg-orange-100 text-orange-800'
       case 'execute':
+      case 'fix_review':
       case 'change_review':
       case 'promote_beta':
         return 'bg-purple-100 text-purple-800'
-      case 'complete':
+      case 'close':
         return 'bg-green-100 text-green-800'
-      case 'failed':
-        return 'bg-red-100 text-red-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -202,34 +96,45 @@ export default function CaseDetailPage() {
 
   const getEventIcon = (eventType: string) => {
     switch (eventType) {
-      case 'case_created':
-        return <Bug className="h-4 w-4 text-blue-500" />
-      case 'stage_transition':
+      case 'stage_enter':
         return <Clock className="h-4 w-4 text-blue-500" />
-      case 'intake_completed':
-      case 'triage_completed':
-      case 'plan_created':
-      case 'review_completed':
-      case 'policy_review_completed':
-      case 'execution_completed':
-      case 'change_review_completed':
+      case 'stage_exit':
         return <CheckCircle2 className="h-4 w-4 text-green-500" />
-      case 'human_approved':
-      case 'autopass_check':
-        return <Shield className="h-4 w-4 text-green-500" />
-      case 'human_rejected':
-        return <XCircle className="h-4 w-4 text-red-500" />
-      case 'pr_merged':
-        return <GitPullRequest className="h-4 w-4 text-purple-500" />
-      case 'case_completed':
+      case 'approval_request':
+        return <Shield className="h-4 w-4 text-orange-500" />
+      case 'approval_granted':
         return <CheckCircle2 className="h-4 w-4 text-green-600" />
-      case 'case_failed':
-      case 'error':
+      case 'approval_rejected':
         return <XCircle className="h-4 w-4 text-red-500" />
-      case 'rollback_initiated':
+      case 'error':
+        return <AlertCircle className="h-4 w-4 text-red-500" />
+      case 'escalation':
         return <AlertCircle className="h-4 w-4 text-orange-500" />
       default:
         return <Clock className="h-4 w-4 text-gray-400" />
+    }
+  }
+
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'bug':
+        return <Bug className="h-5 w-5 text-red-500" />
+      case 'enhancement':
+        return <Zap className="h-5 w-5 text-blue-500" />
+      case 'task':
+        return <Wrench className="h-5 w-5 text-gray-500" />
+      default:
+        return <Bug className="h-5 w-5 text-gray-500" />
+    }
+  }
+
+  const getSeverityColor = (sev: string | null) => {
+    switch (sev) {
+      case 'low': return 'text-green-600'
+      case 'medium': return 'text-yellow-600'
+      case 'high': return 'text-orange-600'
+      case 'critical': return 'text-red-600'
+      default: return 'text-gray-400'
     }
   }
 
@@ -251,7 +156,7 @@ export default function CaseDetailPage() {
     )
   }
 
-  if (!bugReport) {
+  if (!caseData) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center justify-center py-12">
@@ -268,14 +173,14 @@ export default function CaseDetailPage() {
   }
 
   const latestPlan = plans[0]
-  const latestExecution = executions[0]
+  const pendingApproval = approvals.find(a => a.status === 'pending')
 
   // Pipeline progress stages
   const pipelineStages = [
-    'intake', 'triage', 'plan', 'plan_review', 'policy_review',
-    'approval_gate', 'execute', 'change_review', 'promote_beta', 'complete'
+    'intake', 'triage', 'plan', 'plan_review', 'execute',
+    'fix_review', 'policy_review', 'change_review', 'promote_beta', 'close'
   ]
-  const currentStageIndex = caseData ? pipelineStages.indexOf(caseData.stage) : -1
+  const currentStageIndex = pipelineStages.indexOf(caseData.stage)
 
   return (
     <div className="space-y-6">
@@ -288,31 +193,29 @@ export default function CaseDetailPage() {
         </Link>
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold">{bugReport.title}</h1>
+            {getTypeIcon(caseData.case_type)}
+            <h1 className="text-2xl font-bold">{caseData.title}</h1>
             <span className="px-2 py-1 text-xs font-medium rounded-full capitalize bg-primary/10 text-primary">
-              {bugReport.type}
+              {caseData.case_type}
             </span>
-            {caseData && (
-              <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStageColor(caseData.stage)}`}>
-                {caseData.stage.replace(/_/g, ' ')}
-              </span>
-            )}
+            <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStageColor(caseData.stage)}`}>
+              {caseData.stage.replace(/_/g, ' ')}
+            </span>
           </div>
           <p className="text-muted-foreground text-sm mt-1">
-            Reported {formatDate(bugReport.created_at)} &middot; Source: {bugReport.source} &middot; Trust: {bugReport.trust_score}/5
+            Created {formatDate(caseData.created_at)} &middot; Assigned to: {caseData.assigned_to}
           </p>
         </div>
       </div>
 
       {/* Pipeline Progress Bar */}
-      {caseData && caseData.stage !== 'failed' && (
+      {caseData.status !== 'failed' && caseData.status !== 'cancelled' && (
         <Card>
           <CardContent className="py-4">
             <div className="flex items-center gap-1 overflow-x-auto">
               {pipelineStages.map((stage, index) => {
                 const isCompleted = index < currentStageIndex
                 const isCurrent = index === currentStageIndex
-                const isFuture = index > currentStageIndex
                 return (
                   <div key={stage} className="flex items-center flex-shrink-0">
                     <div
@@ -344,18 +247,28 @@ export default function CaseDetailPage() {
               <CardTitle>Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm whitespace-pre-wrap">{bugReport.description}</p>
-              {bugReport.category && (
+              <p className="text-sm whitespace-pre-wrap">{caseData.description || 'No description provided.'}</p>
+              {caseData.area && (
                 <div className="mt-4 pt-4 border-t border-border">
-                  <span className="text-sm text-muted-foreground">Category: </span>
-                  <span className="text-sm font-medium capitalize">{bugReport.category}</span>
+                  <span className="text-sm text-muted-foreground">Area: </span>
+                  <span className="text-sm font-medium capitalize">{caseData.area}</span>
+                </div>
+              )}
+              {caseData.risk_flags && caseData.risk_flags.length > 0 && (
+                <div className="mt-2">
+                  <span className="text-sm text-muted-foreground">Risk flags: </span>
+                  {caseData.risk_flags.map((flag, i) => (
+                    <span key={i} className="inline-block px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 rounded-full mr-1">
+                      {flag}
+                    </span>
+                  ))}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Approval UI - shown when case is at approval_gate */}
-          {caseData?.stage === 'approval_gate' && caseData?.status === 'awaiting_approval' && (
+          {/* Approval UI */}
+          {caseData.status === 'needs_human' && pendingApproval && (
             <Card className="border-orange-300 bg-orange-50/50">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -363,44 +276,15 @@ export default function CaseDetailPage() {
                   Approval Required
                 </CardTitle>
                 <CardDescription>
-                  This case requires human approval before the AI agents proceed with execution.
-                  Review the plan below and approve or reject with feedback.
+                  This case requires human approval before the AI agents proceed.
+                  Gate: {pendingApproval.gate_type.replace(/_/g, ' ')}
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-3">
-                  <div className="flex-1 space-y-2">
-                    <textarea
-                      placeholder="Approval feedback (optional)"
-                      value={approvalFeedback}
-                      onChange={(e) => setApprovalFeedback(e.target.value)}
-                      rows={2}
-                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                    <Button onClick={handleApprove} disabled={isApproving} className="bg-green-600 hover:bg-green-700">
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      {isApproving ? 'Approving...' : 'Approve & Execute'}
-                    </Button>
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <textarea
-                      placeholder="Rejection reason (required)"
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                      rows={2}
-                      className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    />
-                    <Button
-                      onClick={handleReject}
-                      disabled={isRejecting || !rejectReason}
-                      variant="outline"
-                      className="border-red-300 text-red-600 hover:bg-red-50"
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      {isRejecting ? 'Rejecting...' : 'Reject & Revise'}
-                    </Button>
-                  </div>
-                </div>
+              <CardContent>
+                <Button onClick={handleApprove} disabled={isApproving} className="bg-green-600 hover:bg-green-700">
+                  <CheckCircle2 className="h-4 w-4 mr-2" />
+                  {isApproving ? 'Approving...' : 'Approve & Continue'}
+                </Button>
               </CardContent>
             </Card>
           )}
@@ -422,45 +306,33 @@ export default function CaseDetailPage() {
                     {showPlanDetails ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </Button>
                 </div>
-                {latestPlan.summary && (
-                  <CardDescription>{latestPlan.summary}</CardDescription>
-                )}
+                <CardDescription>
+                  Status: {latestPlan.review_status} &middot;
+                  Risk: {(latestPlan.risk_assessment as Record<string, string>)?.level || 'unknown'}
+                </CardDescription>
               </CardHeader>
               {showPlanDetails && (
                 <CardContent className="space-y-4">
-                  {latestPlan.root_cause && (
+                  {latestPlan.implementation && (
                     <div>
-                      <h4 className="text-sm font-semibold mb-1">Root Cause</h4>
-                      <p className="text-sm text-muted-foreground">{latestPlan.root_cause}</p>
+                      <h4 className="text-sm font-semibold mb-1">Implementation Plan</h4>
+                      <pre className="text-xs bg-muted p-3 rounded overflow-x-auto max-h-64">
+                        {JSON.stringify(latestPlan.implementation, null, 2)}
+                      </pre>
                     </div>
                   )}
-                  {latestPlan.files_to_touch?.length > 0 && (
+                  {latestPlan.risk_assessment && Object.keys(latestPlan.risk_assessment).length > 0 && (
                     <div>
-                      <h4 className="text-sm font-semibold mb-1">Files to Touch</h4>
-                      <div className="space-y-1">
-                        {latestPlan.files_to_touch.map((file, i) => (
-                          <code key={i} className="block text-xs bg-muted px-2 py-1 rounded">{file}</code>
-                        ))}
-                      </div>
+                      <h4 className="text-sm font-semibold mb-1">Risk Assessment</h4>
+                      <pre className="text-xs bg-muted p-3 rounded overflow-x-auto max-h-32">
+                        {JSON.stringify(latestPlan.risk_assessment, null, 2)}
+                      </pre>
                     </div>
                   )}
-                  {latestPlan.risk_level && (
+                  {latestPlan.review_notes && (
                     <div>
-                      <h4 className="text-sm font-semibold mb-1">Risk Level</h4>
-                      <span className={`text-sm font-medium ${
-                        latestPlan.risk_level === 'LOW' ? 'text-green-600' :
-                        latestPlan.risk_level === 'MEDIUM' ? 'text-yellow-600' :
-                        latestPlan.risk_level === 'HIGH' ? 'text-orange-600' :
-                        'text-red-600'
-                      }`}>
-                        {latestPlan.risk_level}
-                      </span>
-                    </div>
-                  )}
-                  {latestPlan.rollback_plan && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-1">Rollback Plan</h4>
-                      <p className="text-sm text-muted-foreground">{latestPlan.rollback_plan}</p>
+                      <h4 className="text-sm font-semibold mb-1">Review Notes</h4>
+                      <p className="text-sm text-muted-foreground">{latestPlan.review_notes}</p>
                     </div>
                   )}
                 </CardContent>
@@ -468,8 +340,8 @@ export default function CaseDetailPage() {
             </Card>
           )}
 
-          {/* Execution / PR */}
-          {latestExecution && (
+          {/* PR / Branch info */}
+          {(caseData.pr_url || caseData.branch_name) && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -478,59 +350,23 @@ export default function CaseDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {latestExecution.pr_url && (
+                {caseData.branch_name && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Branch</span>
+                    <code className="text-xs bg-muted px-2 py-1 rounded">{caseData.branch_name}</code>
+                  </div>
+                )}
+                {caseData.pr_url && (
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">Pull Request</span>
                     <a
-                      href={latestExecution.pr_url}
+                      href={caseData.pr_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-sm text-primary hover:underline flex items-center gap-1"
+                      className="text-sm text-primary hover:underline"
                     >
-                      PR #{latestExecution.pr_number}
-                      <ExternalLink className="h-3 w-3" />
+                      View PR
                     </a>
-                  </div>
-                )}
-                {latestExecution.branch && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Branch</span>
-                    <code className="text-xs bg-muted px-2 py-1 rounded">{latestExecution.branch}</code>
-                  </div>
-                )}
-                {latestExecution.ci_status && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">CI Status</span>
-                    <span className={`text-sm font-medium ${
-                      latestExecution.ci_status === 'success' ? 'text-green-600' :
-                      latestExecution.ci_status === 'failure' ? 'text-red-600' :
-                      'text-yellow-600'
-                    }`}>
-                      {latestExecution.ci_status}
-                    </span>
-                  </div>
-                )}
-                {latestExecution.deployment_status && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Deployment</span>
-                    <span className={`text-sm font-medium ${
-                      latestExecution.deployment_status === 'deployed' ? 'text-green-600' :
-                      latestExecution.deployment_status === 'failed' ? 'text-red-600' :
-                      latestExecution.deployment_status === 'rolled_back' ? 'text-orange-600' :
-                      'text-yellow-600'
-                    }`}>
-                      {latestExecution.deployment_status}
-                    </span>
-                  </div>
-                )}
-                {latestExecution.changed_files?.length > 0 && (
-                  <div>
-                    <span className="text-sm text-muted-foreground">Changed Files</span>
-                    <div className="mt-1 space-y-1">
-                      {latestExecution.changed_files.map((file, i) => (
-                        <code key={i} className="block text-xs bg-muted px-2 py-1 rounded">{file}</code>
-                      ))}
-                    </div>
                   </div>
                 )}
               </CardContent>
@@ -538,58 +374,44 @@ export default function CaseDetailPage() {
           )}
         </div>
 
-        {/* Sidebar - Case Info + Timeline */}
+        {/* Sidebar */}
         <div className="space-y-6">
           {/* Case Info */}
-          {caseData && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Case Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Stage</span>
-                  <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getStageColor(caseData.stage)}`}>
-                    {caseData.stage.replace(/_/g, ' ')}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Status</span>
-                  <span className="font-medium capitalize">{caseData.status.replace(/_/g, ' ')}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Risk</span>
-                  <span className={`font-medium ${
-                    caseData.risk_level === 'LOW' ? 'text-green-600' :
-                    caseData.risk_level === 'MEDIUM' ? 'text-yellow-600' :
-                    caseData.risk_level === 'HIGH' ? 'text-orange-600' :
-                    caseData.risk_level === 'CRITICAL' ? 'text-red-600' :
-                    'text-gray-400'
-                  }`}>
-                    {caseData.risk_level || 'TBD'}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Trust Score</span>
-                  <span className="font-medium">{caseData.trust_score}/5</span>
-                </div>
-                {caseData.repro_confidence !== null && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Repro Confidence</span>
-                    <span className="font-medium">{(caseData.repro_confidence * 100).toFixed(0)}%</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Plan Loops</span>
-                  <span className="font-medium">{caseData.plan_review_loops}/3</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Execute Retries</span>
-                  <span className="font-medium">{caseData.execute_retries}/2</span>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          <Card>
+            <CardHeader>
+              <CardTitle>Case Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Stage</span>
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getStageColor(caseData.stage)}`}>
+                  {caseData.stage.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Status</span>
+                <span className="font-medium capitalize">{caseData.status.replace(/_/g, ' ')}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Severity</span>
+                <span className={`font-medium capitalize ${getSeverityColor(caseData.severity)}`}>
+                  {caseData.severity || 'TBD'}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Area</span>
+                <span className="font-medium capitalize">{caseData.area || 'TBD'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Retries</span>
+                <span className="font-medium">{caseData.retry_count}/{caseData.max_retries}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Assigned</span>
+                <span className="font-medium">{caseData.assigned_to}</span>
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Timeline */}
           <Card>
@@ -612,7 +434,7 @@ export default function CaseDetailPage() {
                 ) : (
                   <div className="space-y-4">
                     {events.map((event) => (
-                      <div key={event.id} className="flex gap-3">
+                      <div key={event.event_id} className="flex gap-3">
                         <div className="mt-0.5">{getEventIcon(event.event_type)}</div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium">
@@ -621,13 +443,16 @@ export default function CaseDetailPage() {
                           <p className="text-xs text-muted-foreground">
                             {event.actor} &middot; {event.stage} &middot; {formatDate(event.created_at)}
                           </p>
-                          {event.payload && Object.keys(event.payload).length > 0 && (
+                          {event.summary && (
+                            <p className="text-xs text-muted-foreground mt-1">{event.summary}</p>
+                          )}
+                          {event.details && Object.keys(event.details).length > 0 && (
                             <details className="mt-1">
                               <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
                                 Details
                               </summary>
                               <pre className="text-xs bg-muted p-2 rounded mt-1 overflow-x-auto max-h-32">
-                                {JSON.stringify(event.payload, null, 2)}
+                                {JSON.stringify(event.details, null, 2)}
                               </pre>
                             </details>
                           )}

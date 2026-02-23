@@ -1,32 +1,26 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Bug, Search, AlertCircle, CheckCircle2, Clock, XCircle, Zap } from 'lucide-react'
+import { Plus, Bug, Search, AlertCircle, CheckCircle2, Clock, XCircle, Zap, Wrench } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useOrganization } from '@/contexts/org-context'
-import { createAgenticBrowserClient } from '@/lib/supabase-agentic'
+import { apiClient } from '@/lib/api-client'
 import { formatDate } from '@/lib/utils'
-import type { AgenticDatabase } from '@/lib/supabase-agentic'
-
-type BugReport = AgenticDatabase['public']['Tables']['bug_reports']['Row']
-type Case = AgenticDatabase['public']['Tables']['cases']['Row']
-
-type BugWithCase = BugReport & {
-  cases: Case[]
-}
+import type { Case } from '@/lib/api-client'
 
 export default function CasesPage() {
-  const [bugReports, setBugReports] = useState<BugWithCase[]>([])
-  const [filteredReports, setFilteredReports] = useState<BugWithCase[]>([])
+  const [cases, setCases] = useState<Case[]>([])
+  const [filteredCases, setFilteredCases] = useState<Case[]>([])
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [reportType, setReportType] = useState<'bug' | 'enhancement'>('bug')
-  const [category, setCategory] = useState('')
+  const [caseType, setCaseType] = useState<'bug' | 'enhancement' | 'task'>('bug')
+  const [severity, setSeverity] = useState('')
+  const [area, setArea] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [typeFilter, setTypeFilter] = useState<string>('all')
   const [stageFilter, setStageFilter] = useState<string>('all')
@@ -34,29 +28,20 @@ export default function CasesPage() {
   const [isCreating, setIsCreating] = useState(false)
   const [error, setError] = useState('')
 
-  const { currentOrg, user } = useOrganization()
-  const agentic = createAgenticBrowserClient()
+  const { currentOrg } = useOrganization()
 
-  const fetchBugReports = async () => {
+  const fetchCases = async () => {
     if (!currentOrg) return
 
     setIsLoading(true)
     try {
-      const { data, error } = await agentic
-        .from('bug_reports')
-        .select(`
-          *,
-          cases (*)
-        `)
-        .eq('org_id', currentOrg.id)
-        .order('created_at', { ascending: false })
+      const params: Record<string, string> = { limit: '100' }
+      if (typeFilter !== 'all') params.case_type = typeFilter
+      if (stageFilter !== 'all') params.stage = stageFilter
 
-      if (error) {
-        setError(error.message)
-      } else {
-        setBugReports((data as BugWithCase[]) || [])
-        setFilteredReports((data as BugWithCase[]) || [])
-      }
+      const response = await apiClient.listTasks(currentOrg.id, params)
+      setCases(response.data)
+      setFilteredCases(response.data)
     } catch {
       setError('Failed to fetch cases')
     } finally {
@@ -64,91 +49,53 @@ export default function CasesPage() {
     }
   }
 
-  const handleCreateBugReport = async (e: React.FormEvent) => {
+  const handleCreateCase = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!currentOrg || !user) return
+    if (!currentOrg) return
 
     setIsCreating(true)
     setError('')
 
     try {
-      // Create bug report
-      const { data: bugReport, error: bugError } = await agentic
-        .from('bug_reports')
-        .insert({
-          org_id: currentOrg.id,
-          user_id: user.id,
-          title,
-          description,
-          type: reportType,
-          source: 'human' as const,
-          category: category || null,
-          trust_score: 3,
-        })
-        .select()
-        .single()
+      await apiClient.createTask(currentOrg.id, {
+        title,
+        description: description || undefined,
+        case_type: caseType,
+        severity: severity || undefined,
+        area: area || undefined,
+      })
 
-      if (bugError) {
-        setError(bugError.message)
-        return
-      }
-
-      // Create case
-      const { error: caseError } = await agentic
-        .from('cases')
-        .insert({
-          org_id: currentOrg.id,
-          bug_report_id: bugReport.id,
-          trust_score: 3,
-          stage: 'intake',
-          status: 'active',
-        })
-
-      if (caseError) {
-        setError(caseError.message)
-        return
-      }
-
-      await fetchBugReports()
+      await fetchCases()
       setTitle('')
       setDescription('')
-      setReportType('bug')
-      setCategory('')
+      setCaseType('bug')
+      setSeverity('')
+      setArea('')
       setShowCreateForm(false)
-    } catch {
-      setError('Failed to create report')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create case')
     } finally {
       setIsCreating(false)
     }
   }
 
-  // Filter reports
+  // Client-side search filter
   useEffect(() => {
-    let filtered = bugReports
+    let filtered = cases
 
     if (searchTerm) {
-      filtered = filtered.filter(report =>
-        report.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        report.description?.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter(c =>
+        c.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        c.description?.toLowerCase().includes(searchTerm.toLowerCase())
       )
     }
 
-    if (typeFilter !== 'all') {
-      filtered = filtered.filter(report => report.type === typeFilter)
-    }
-
-    if (stageFilter !== 'all') {
-      filtered = filtered.filter(report =>
-        report.cases?.some(c => c.stage === stageFilter)
-      )
-    }
-
-    setFilteredReports(filtered)
-  }, [bugReports, searchTerm, typeFilter, stageFilter])
+    setFilteredCases(filtered)
+  }, [cases, searchTerm])
 
   useEffect(() => {
-    fetchBugReports()
-  }, [currentOrg])
+    fetchCases()
+  }, [currentOrg, typeFilter, stageFilter])
 
   const getStageColor = (stage: string) => {
     switch (stage) {
@@ -159,16 +106,12 @@ export default function CasesPage() {
       case 'plan_review':
       case 'policy_review':
         return 'bg-yellow-100 text-yellow-800'
-      case 'approval_gate':
-        return 'bg-orange-100 text-orange-800'
       case 'execute':
       case 'change_review':
       case 'promote_beta':
         return 'bg-purple-100 text-purple-800'
-      case 'complete':
+      case 'close':
         return 'bg-green-100 text-green-800'
-      case 'failed':
-        return 'bg-red-100 text-red-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -176,28 +119,31 @@ export default function CasesPage() {
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'active':
+      case 'open':
+      case 'in_progress':
         return <Clock className="h-4 w-4 text-blue-500" />
-      case 'awaiting_approval':
+      case 'needs_human':
+      case 'blocked':
         return <AlertCircle className="h-4 w-4 text-orange-500" />
-      case 'complete':
+      case 'completed':
         return <CheckCircle2 className="h-4 w-4 text-green-500" />
       case 'failed':
+      case 'cancelled':
         return <XCircle className="h-4 w-4 text-red-500" />
       default:
         return <Clock className="h-4 w-4 text-gray-500" />
     }
   }
 
-  const getRiskColor = (risk: string | null) => {
-    switch (risk) {
-      case 'LOW':
+  const getSeverityColor = (sev: string | null) => {
+    switch (sev) {
+      case 'low':
         return 'text-green-600'
-      case 'MEDIUM':
+      case 'medium':
         return 'text-yellow-600'
-      case 'HIGH':
+      case 'high':
         return 'text-orange-600'
-      case 'CRITICAL':
+      case 'critical':
         return 'text-red-600'
       default:
         return 'text-gray-400'
@@ -210,8 +156,8 @@ export default function CasesPage() {
         return <Bug className="h-6 w-6 text-red-500" />
       case 'enhancement':
         return <Zap className="h-6 w-6 text-blue-500" />
-      case 'regression':
-        return <AlertCircle className="h-6 w-6 text-orange-500" />
+      case 'task':
+        return <Wrench className="h-6 w-6 text-gray-500" />
       default:
         return <Bug className="h-6 w-6 text-gray-500" />
     }
@@ -231,12 +177,12 @@ export default function CasesPage() {
         <div>
           <h1 className="text-3xl font-bold">Cases</h1>
           <p className="text-muted-foreground">
-            Bug reports and enhancements for {currentOrg.name}
+            Bug reports, enhancements, and tasks for {currentOrg.name}
           </p>
         </div>
         <Button onClick={() => setShowCreateForm(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Report Issue
+          New Case
         </Button>
       </div>
 
@@ -259,7 +205,7 @@ export default function CasesPage() {
           <option value="all">All Types</option>
           <option value="bug">Bugs</option>
           <option value="enhancement">Enhancements</option>
-          <option value="regression">Regressions</option>
+          <option value="task">Tasks</option>
         </Select>
         <Select
           value={stageFilter}
@@ -271,13 +217,12 @@ export default function CasesPage() {
           <option value="triage">Triage</option>
           <option value="plan">Planning</option>
           <option value="plan_review">Plan Review</option>
-          <option value="policy_review">Policy Review</option>
-          <option value="approval_gate">Awaiting Approval</option>
           <option value="execute">Executing</option>
+          <option value="fix_review">Fix Review</option>
+          <option value="policy_review">Policy Review</option>
           <option value="change_review">Change Review</option>
           <option value="promote_beta">Deploying</option>
-          <option value="complete">Complete</option>
-          <option value="failed">Failed</option>
+          <option value="close">Closed</option>
         </Select>
       </div>
 
@@ -285,13 +230,13 @@ export default function CasesPage() {
       {showCreateForm && (
         <Card>
           <CardHeader>
-            <CardTitle>Report an Issue</CardTitle>
+            <CardTitle>New Case</CardTitle>
             <CardDescription>
-              Submit a bug report or enhancement request for the AI agents to process
+              Submit a bug report, enhancement, or task for the AI agents to process
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleCreateBugReport} className="space-y-4">
+            <form onSubmit={handleCreateCase} className="space-y-4">
               <div className="flex gap-4">
                 <div className="space-y-2 flex-1">
                   <label htmlFor="title" className="text-sm font-medium">
@@ -303,6 +248,7 @@ export default function CasesPage() {
                     value={title}
                     onChange={(e) => setTitle(e.target.value)}
                     required
+                    minLength={3}
                   />
                 </div>
                 <div className="space-y-2 w-40">
@@ -311,11 +257,12 @@ export default function CasesPage() {
                   </label>
                   <Select
                     id="type"
-                    value={reportType}
-                    onChange={(e) => setReportType(e.target.value as 'bug' | 'enhancement')}
+                    value={caseType}
+                    onChange={(e) => setCaseType(e.target.value as 'bug' | 'enhancement' | 'task')}
                   >
                     <option value="bug">Bug</option>
                     <option value="enhancement">Enhancement</option>
+                    <option value="task">Task</option>
                   </Select>
                 </div>
               </div>
@@ -329,31 +276,48 @@ export default function CasesPage() {
                   placeholder="Detailed description including steps to reproduce, expected behavior, and actual behavior"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  required
                   rows={4}
                   className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                 />
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="category" className="text-sm font-medium">
-                  Category (optional)
-                </label>
-                <Select
-                  id="category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                >
-                  <option value="">Select category...</option>
-                  <option value="ui">UI / Frontend</option>
-                  <option value="api">API / Backend</option>
-                  <option value="database">Database</option>
-                  <option value="auth">Authentication</option>
-                  <option value="billing">Billing</option>
-                  <option value="performance">Performance</option>
-                  <option value="config">Configuration</option>
-                  <option value="other">Other</option>
-                </Select>
+              <div className="flex gap-4">
+                <div className="space-y-2 flex-1">
+                  <label htmlFor="severity" className="text-sm font-medium">
+                    Severity (optional)
+                  </label>
+                  <Select
+                    id="severity"
+                    value={severity}
+                    onChange={(e) => setSeverity(e.target.value)}
+                  >
+                    <option value="">Select severity...</option>
+                    <option value="critical">Critical</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                  </Select>
+                </div>
+                <div className="space-y-2 flex-1">
+                  <label htmlFor="area" className="text-sm font-medium">
+                    Area (optional)
+                  </label>
+                  <Select
+                    id="area"
+                    value={area}
+                    onChange={(e) => setArea(e.target.value)}
+                  >
+                    <option value="">Select area...</option>
+                    <option value="api">API / Backend</option>
+                    <option value="dashboard">Dashboard / UI</option>
+                    <option value="auth">Authentication</option>
+                    <option value="billing">Billing</option>
+                    <option value="database">Database</option>
+                    <option value="mobile">Mobile</option>
+                    <option value="infrastructure">Infrastructure</option>
+                    <option value="other">Other</option>
+                  </Select>
+                </div>
               </div>
 
               {error && (
@@ -364,7 +328,7 @@ export default function CasesPage() {
 
               <div className="flex space-x-3">
                 <Button type="submit" disabled={isCreating}>
-                  {isCreating ? 'Submitting...' : 'Submit Report'}
+                  {isCreating ? 'Submitting...' : 'Submit Case'}
                 </Button>
                 <Button
                   type="button"
@@ -373,7 +337,8 @@ export default function CasesPage() {
                     setShowCreateForm(false)
                     setTitle('')
                     setDescription('')
-                    setCategory('')
+                    setSeverity('')
+                    setArea('')
                     setError('')
                   }}
                 >
@@ -392,91 +357,78 @@ export default function CasesPage() {
             <p className="text-muted-foreground">Loading cases...</p>
           </CardContent>
         </Card>
-      ) : filteredReports.length === 0 ? (
+      ) : filteredCases.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Bug className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">
-              {bugReports.length === 0 ? 'No cases yet' : 'No cases match your filters'}
+              {cases.length === 0 ? 'No cases yet' : 'No cases match your filters'}
             </h3>
             <p className="text-muted-foreground text-center mb-4">
-              {bugReports.length === 0
-                ? 'Submit a bug report or enhancement request to get started'
+              {cases.length === 0
+                ? 'Submit a bug report or task to get started'
                 : 'Try adjusting your search or filter criteria'
               }
             </p>
-            {bugReports.length === 0 && (
+            {cases.length === 0 && (
               <Button onClick={() => setShowCreateForm(true)}>
                 <Plus className="h-4 w-4 mr-2" />
-                Report First Issue
+                Create First Case
               </Button>
             )}
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredReports.map((report) => {
-            const caseData = report.cases?.[0]
-            return (
-              <Link key={report.id} href={`/cases/${report.id}`}>
-                <Card className="h-full cursor-pointer hover:shadow-md transition-shadow">
-                  <CardHeader>
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-3 min-w-0 flex-1">
-                        <div className="p-2 bg-primary/10 rounded-lg">
-                          {getTypeIcon(report.type)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <CardTitle className="text-lg truncate">{report.title}</CardTitle>
-                          <CardDescription className="truncate">
-                            {report.description?.slice(0, 80) || 'No description'}
-                          </CardDescription>
-                        </div>
+          {filteredCases.map((c) => (
+            <Link key={c.case_id} href={`/cases/${c.case_id}`}>
+              <Card className="h-full cursor-pointer hover:shadow-md transition-shadow">
+                <CardHeader>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-3 min-w-0 flex-1">
+                      <div className="p-2 bg-primary/10 rounded-lg">
+                        {getTypeIcon(c.case_type)}
                       </div>
-                      {caseData && (
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full whitespace-nowrap ${getStageColor(caseData.stage)}`}>
-                          {caseData.stage.replace(/_/g, ' ')}
-                        </span>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Type</span>
-                        <span className="font-medium capitalize">{report.type}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Source</span>
-                        <span className="font-medium capitalize">{report.source}</span>
-                      </div>
-                      {caseData && (
-                        <>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Status</span>
-                            <span className="flex items-center gap-1">
-                              {getStatusIcon(caseData.status)}
-                              <span className="font-medium capitalize">{caseData.status.replace(/_/g, ' ')}</span>
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-sm">
-                            <span className="text-muted-foreground">Risk</span>
-                            <span className={`font-medium ${getRiskColor(caseData.risk_level)}`}>
-                              {caseData.risk_level || 'TBD'}
-                            </span>
-                          </div>
-                        </>
-                      )}
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Created</span>
-                        <span className="font-medium">{formatDate(report.created_at)}</span>
+                      <div className="min-w-0 flex-1">
+                        <CardTitle className="text-lg truncate">{c.title}</CardTitle>
+                        <CardDescription className="truncate">
+                          {c.description?.slice(0, 80) || 'No description'}
+                        </CardDescription>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            )
-          })}
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full whitespace-nowrap ${getStageColor(c.stage)}`}>
+                      {c.stage.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Type</span>
+                      <span className="font-medium capitalize">{c.case_type}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Status</span>
+                      <span className="flex items-center gap-1">
+                        {getStatusIcon(c.status)}
+                        <span className="font-medium capitalize">{c.status.replace(/_/g, ' ')}</span>
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Severity</span>
+                      <span className={`font-medium capitalize ${getSeverityColor(c.severity)}`}>
+                        {c.severity || 'TBD'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Created</span>
+                      <span className="font-medium">{formatDate(c.created_at)}</span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>
